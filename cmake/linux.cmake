@@ -1,7 +1,3 @@
 set(CMAKE_C_COMPILER "clang")
 set(CMAKE_CXX_COMPILER "clang++")
-set(CMAKE_C_COMPILER_AR "ar")
-set(CMAKE_CXX_COMPILER_AR "ar")
-set(CMAKE_C_COMPILER_RANLIB "ranlib")
-set(CMAKE_CXX_COMPILER_RANLIB "ranlib")
 add_link_options("-fuse-ld=mold")
