@@ -85,9 +85,9 @@ llmd_default_log(
 ) {
 	(void)host;
 
-	printf("[%s] ", llmd_log_level_to_str(level));
-	vprintf(format, args);
-	printf("\n");
+	fprintf(stderr, "[%s] ", llmd_log_level_to_str(level));
+	vfprintf(stderr, format, args);
+	fprintf(stderr, "\n");
 }
 
 static struct llmd_host_interface llmd_default_host_interface = {

@@ -1,10 +1,10 @@
 #include <llmd/core.h>
+#include <llmd/utils/buffer.h>
+#include <llmd/utils/host.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-#include "buffer.h"
-#include "host.h"
 
 #define LLMD_TRY enum llmd_error llmd_status = LLMD_OK;
 #define LLMD_EXCEPT_BEGIN llmd_except:
@@ -289,6 +289,10 @@ llmd_create_session(
 	struct llmd_session** session_out
 ) {
 LLMD_TRY
+	if (host == NULL) {
+		host = &llmd_default_host;
+	}
+
 	struct llmd_session* session = NULL;
 	LLMD_CHECKED_MALLOC(session, host, sizeof(struct llmd_session));
 

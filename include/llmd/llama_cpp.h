@@ -20,7 +20,8 @@
 
 struct llmd_llama_cpp_driver_config {
 	struct llama_context_params context_params;
-	int max_contexts;
+	const char* model_path;
+	unsigned int max_contexts;
 };
 
 #ifdef __cplusplus
@@ -30,7 +31,7 @@ extern "C" {
 LLMD_LLAMA_CPP_API enum llmd_error
 llmd_create_llama_cpp_driver(
 	struct llmd_host* host,
-	struct llmd_llama_cpp_driver_config config,
+	struct llmd_llama_cpp_driver_config* config,
 	struct llmd_driver** driver_out
 );
 

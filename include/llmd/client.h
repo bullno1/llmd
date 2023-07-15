@@ -28,7 +28,6 @@ extern "C" {
 LLMD_CLIENT_API enum llmd_error
 llmd_r_create_session(
 	struct llmd_host* host,
-	struct llmd_driver* driver,
 	struct llmd_r_session** session_out
 );
 
