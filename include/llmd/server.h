@@ -22,8 +22,6 @@ struct llmd_server;
 struct llmd_server_config {
 	const char* endpoint_name;
 	int max_num_clients;
-	int required_uid;
-	int required_gid;
 };
 
 #ifdef __cplusplus
@@ -33,8 +31,9 @@ extern "C" {
 LLMD_SERVER_API enum llmd_error
 llmd_create_server(
 	struct llmd_host* host,
-	struct llmd_session* session,
-	struct llmd_server** server
+	struct llmd_driver* driver,
+	const struct llmd_server_config* config,
+	struct llmd_server** server_out
 );
 
 LLMD_SERVER_API enum llmd_error
