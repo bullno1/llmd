@@ -1,5 +1,4 @@
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(LLMD_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
 
 if (MSVC)
     add_compile_options(/W4 /WX)
