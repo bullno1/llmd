@@ -21,6 +21,7 @@
 struct llmd_llama_cpp_driver_config {
 	struct llama_context_params context_params;
 	const char* model_path;
+	unsigned int num_threads;
 	unsigned int max_contexts;
 };
 
