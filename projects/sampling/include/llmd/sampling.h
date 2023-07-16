@@ -4,6 +4,7 @@
 #include <llmd/core.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef LLMD_SAMPLING_SHARED
 #    if defined(_WIN32) && !defined(__MINGW32__)
@@ -18,6 +19,11 @@
 #else
 #    define LLMD_SAMPLING_API
 #endif
+
+// PCG from https://github.com/mattiasgustavsson/libs
+struct llmd_sampling_default_rng_state {
+	uint64_t state[2];
+};
 
 struct llmd_sampling_candidates {
 	unsigned int num_candidates;
@@ -42,6 +48,14 @@ struct llmd_sampling_mirostat_v2_state {
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// RNG
+
+LLMD_SAMPLING_API struct llmd_sampling_rng
+llmd_sampling_init_default_rng(
+	struct llmd_sampling_default_rng_state* state,
+	uint32_t seed
+);
 
 // Ring buffer
 
