@@ -1,8 +1,8 @@
 #include <llmd/sampling.h>
 #include <math.h>
 
-llmd_token_t
-llmd_sampling_pick_weighted_random(
+static inline unsigned int
+llmd_sampling_pick_weighted_random_idx(
 	struct llmd_sampling_candidates* candidates,
 	struct llmd_sampling_rng* rng
 ) {
@@ -17,15 +17,25 @@ llmd_sampling_pick_weighted_random(
 		sum -= threshold;
 
 		if (sum <= 0) {
-			return candidates->ids[i];
+			return i;
 		}
 	}
 
-	return candidates->ids[candidates->num_candidates - 1];
+	return candidates->num_candidates > 0
+		? candidates->num_candidates - 1
+		: 0;
 }
 
 llmd_token_t
-llmd_sampling_pick_max(
+llmd_sampling_pick_weighted_random(
+	struct llmd_sampling_candidates* candidates,
+	struct llmd_sampling_rng* rng
+) {
+	return candidates->ids[llmd_sampling_pick_weighted_random_idx(candidates, rng)];
+}
+
+llmd_token_t
+llmd_sampling_pick_max_score(
 	struct llmd_sampling_candidates* candidates
 ) {
 	float max_score = -INFINITY;
@@ -43,5 +53,35 @@ llmd_sampling_pick_max(
 LLMD_SAMPLING_API llmd_token_t
 llmd_sampling_pick_mirostat_v2(
 	struct llmd_sampling_candidates* candidates,
-	float tau, float eta, float * mu
-);
+	struct llmd_sampling_rng* rng,
+	struct llmd_sampling_mirostat_v2_state* mirostat_v2
+) {
+	llmd_sampling_apply_softmax(candidates);
+
+	float mu = mirostat_v2->mu;
+	unsigned int size = candidates->num_candidates;
+	for (unsigned int i = 0; i < size; ++i) {
+		float surprise = -log2f(candidates->scores[i]);
+		if (surprise > mu && size > 1) {
+			// Overwrite with the last element
+			size -= 1;
+			candidates->scores[i] = candidates->scores[size];
+			candidates->ids[i] = candidates->ids[size];
+		}
+
+		if (size == 1) {
+			break;
+		}
+	}
+	candidates->sorted = false;
+	candidates->num_candidates = size;
+
+	llmd_sampling_apply_softmax(candidates);
+	unsigned int chosen_idx = llmd_sampling_pick_weighted_random_idx(candidates, rng);
+
+	float observed_surprise = -log2f(candidates->scores[chosen_idx]);
+	float error = observed_surprise - mirostat_v2->tau;
+	mirostat_v2->mu = mu - mirostat_v2->eta * error;
+
+	return candidates->ids[chosen_idx];
+}

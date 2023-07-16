@@ -33,6 +33,12 @@ struct llmd_sampling_rng {
 
 struct llmd_sampling_ring_buf;
 
+struct llmd_sampling_mirostat_v2_state {
+	float tau;
+	float eta;
+	float mu;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -115,14 +121,15 @@ llmd_sampling_pick_weighted_random(
 );
 
 LLMD_SAMPLING_API llmd_token_t
-llmd_sampling_pick_max(
+llmd_sampling_pick_max_score(
 	struct llmd_sampling_candidates* candidates
 );
 
 LLMD_SAMPLING_API llmd_token_t
 llmd_sampling_pick_mirostat_v2(
 	struct llmd_sampling_candidates* candidates,
-	float tau, float eta, float * mu
+	struct llmd_sampling_rng* rng,
+	struct llmd_sampling_mirostat_v2_state* mirostat_v2
 );
 
 #ifdef __cplusplus
