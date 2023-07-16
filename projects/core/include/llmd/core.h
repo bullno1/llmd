@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdarg.h>
+#include <limits.h>
 
 #ifdef LLMD_CORE_SHARED
 #    if defined(_WIN32) && !defined(__MINGW32__)
@@ -17,6 +18,8 @@
 #else
 #    define LLMD_CORE_API
 #endif
+
+#define LLMD_INVALID_TOKEN UINT_MAX
 
 enum llmd_error {
 	LLMD_OK,

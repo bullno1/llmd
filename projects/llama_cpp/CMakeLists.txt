@@ -10,7 +10,8 @@ else ()
 endif ()
 
 target_include_directories(llmd_llama_cpp PUBLIC "./include")
-target_link_libraries(llmd_llama_cpp PRIVATE llmd_utils llmd_core llama)
+target_link_libraries(llmd_llama_cpp PUBLIC llmd_core_interface)
+target_link_libraries(llmd_llama_cpp PRIVATE llmd_utils llama)
 
 if (NOT MSVC)
 	target_compile_options(llmd_llama_cpp PRIVATE
