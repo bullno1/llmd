@@ -23,6 +23,7 @@ struct llmd_sampling_candidates {
 	unsigned int num_candidates;
 	float* scores;
 	llmd_token_t* ids;
+	bool sorted;
 };
 
 struct llmd_sampling_rng {
@@ -96,6 +97,13 @@ LLMD_SAMPLING_API void
 llmd_sampling_filter_top_k(
 	struct llmd_sampling_candidates* candidates,
 	unsigned int k
+);
+
+LLMD_SAMPLING_API void
+llmd_sampling_filter_top_p(
+	struct llmd_sampling_candidates* candidates,
+	float p,
+	unsigned int min_keep
 );
 
 // Pick
