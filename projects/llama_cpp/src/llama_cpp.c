@@ -307,6 +307,8 @@ llmd_set_driver_config(
 		} else {
 			return LLMD_ERR_INVALID;
 		}
+	} else if (strcmp(section, "llmd") == 0) {
+		return LLMD_OK;
 	} else {
 		return LLMD_ERR_INVALID;
 	}
