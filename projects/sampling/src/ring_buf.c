@@ -1,6 +1,6 @@
 #include <llmd/sampling.h>
 #include <llmd/utils/host.h>
-#include <llmd/utils/khash.h>
+#include <khash.h>
 #include <string.h>
 #include <stdint.h>
 

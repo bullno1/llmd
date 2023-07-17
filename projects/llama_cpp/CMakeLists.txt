@@ -19,9 +19,6 @@ if (NOT MSVC)
 		-Wno-strict-prototypes
 	)
 	target_link_options(llmd_llama_cpp PRIVATE
-		-Wl,-ffunction-sections
-		-Wl,-fdata-sections
-		-Wl,--gc-sections
 		-Wl,--exclude-libs,ALL
 		-Wl,--no-whole-archive
 	)

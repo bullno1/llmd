@@ -6,6 +6,8 @@ else()
 endif()
 
 add_subdirectory(utils)
+add_subdirectory(vendor)
 add_subdirectory(core)
 add_subdirectory(llama_cpp)
 add_subdirectory(sampling)
+add_subdirectory(examples)

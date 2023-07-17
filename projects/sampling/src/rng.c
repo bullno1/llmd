@@ -1,6 +1,6 @@
 #include <llmd/sampling.h>
 #define RND_IMPLEMENTATION
-#include "rnd.h"
+#include <rnd.h>
 
 struct llmd_sampling_rng
 llmd_sampling_init_default_rng(
