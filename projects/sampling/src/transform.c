@@ -39,13 +39,14 @@ llmd_sampling_apply_repetition_penalties(
 	struct llmd_sampling_ring_buf* recent_tokens,
 	float penalty
 ) {
-	for (unsigned int i = 0;; ++i) {
+	for (
+		unsigned int i = 0;
+		i < llmd_sampling_ring_buf_num_unique_tokens(recent_tokens);
+		++i
+	) {
 		llmd_token_t token;
-		llmd_sampling_ring_buf_get_token(recent_tokens, i, &token, NULL);
-
-		if (token == LLMD_INVALID_TOKEN) {
-			break;
-		}
+		unsigned int frequency;
+		llmd_sampling_ring_buf_get_unique_token(recent_tokens, i, &token, &frequency);
 
 		float score = candidates->scores[token];
 		if (score > 0) {
@@ -63,14 +64,14 @@ llmd_sampling_apply_frequency_and_presence_penalties(
 	float alpha_frequency,
 	float alpha_presence
 ) {
-	for (unsigned int i = 0;; ++i) {
+	for (
+		unsigned int i = 0;
+		i < llmd_sampling_ring_buf_num_unique_tokens(recent_tokens);
+		++i
+	) {
 		llmd_token_t token;
 		unsigned int frequency;
-		llmd_sampling_ring_buf_get_token(recent_tokens, i, &token, &frequency);
-
-		if (token == LLMD_INVALID_TOKEN) {
-			break;
-		}
+		llmd_sampling_ring_buf_get_unique_token(recent_tokens, i, &token, &frequency);
 
 		candidates->scores[token] -= (float)frequency * alpha_frequency + (float)(frequency > 0) * alpha_presence;
 	}

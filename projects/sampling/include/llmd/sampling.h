@@ -77,8 +77,13 @@ llmd_sampling_ring_buf_add_token(
 	llmd_token_t token
 );
 
+LLMD_SAMPLING_API unsigned int
+llmd_sampling_ring_buf_num_unique_tokens(
+	struct llmd_sampling_ring_buf* ring_buf
+);
+
 LLMD_SAMPLING_API void
-llmd_sampling_ring_buf_get_token(
+llmd_sampling_ring_buf_get_unique_token(
 	struct llmd_sampling_ring_buf* ring_buf,
 	unsigned int index,
 	llmd_token_t* token_out,
