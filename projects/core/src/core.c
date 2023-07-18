@@ -199,11 +199,12 @@ llmd_bind_virtual_ctx(
 				}
 			}
 
-			if (
-				chosen_context == NULL
-				&& llmd_create_shared_physical_ctx(session, &chosen_context) != LLMD_OK
-			) {
-				return LLMD_ERR_OOM;
+			if (chosen_context == NULL) {
+				if (llmd_create_shared_physical_ctx(session, &chosen_context) != LLMD_OK) {
+					return LLMD_ERR_OOM;
+				} else {
+					upload_size = num_tokens;
+				}
 			}
 
 			chosen_context->virtual_ctx = virtual_ctx;
@@ -240,25 +241,23 @@ llmd_bind_virtual_ctx(
 				}
 			}
 
-			if (
-				// Allocate a new context if we can't find a free context.
-				// Or allocate anyway we have to discard anything to minimize
-				// discard.
-				(chosen_context == NULL || discard_size > 0)
-				// If we fail
-				&& llmd_create_shared_physical_ctx(session, &chosen_context) != LLMD_OK
-				// And we never found a free context in the first place
-				&& chosen_context == NULL
-			) {
-				return LLMD_ERR_OOM;
+			if (chosen_context == NULL || discard_size > 0) {
+				// Try to create a new context to reduce discard_size
+				if (llmd_create_shared_physical_ctx(session, &chosen_context) != LLMD_OK) {
+					// If we never found a context
+					if (chosen_context == NULL) {
+						return LLMD_ERR_OOM;
+					}
+					// Continue with the chosen context
+				} else {
+					discard_size = 0;
+				}
 			}
 
 			chosen_context->virtual_ctx = virtual_ctx;
 			virtual_ctx->physical_ctx = chosen_context;
 
-			*eval_offset_out = chosen_context->filled_size == 0
-				? 0
-				: chosen_context->filled_size - discard_size;
+			*eval_offset_out = chosen_context->filled_size - discard_size;
 
 			return LLMD_OK;
 		}
@@ -276,8 +275,10 @@ llmd_unbind_virtual_ctx(
 	struct llmd_physical_context* physical_ctx = virtual_ctx->physical_ctx;
 
 	// TODO: barrier?
-	physical_ctx->virtual_ctx = NULL;
-	virtual_ctx->physical_ctx = NULL;
+	if (physical_ctx) {
+		physical_ctx->virtual_ctx = NULL;
+		virtual_ctx->physical_ctx = NULL;
+	}
 
 	return LLMD_OK;
 }
@@ -384,8 +385,9 @@ llmd_destroy_context(
 	struct llmd_host* host = session->host;
 
 	if (context->generating) {
-		llmd_log(host, LLMD_LOG_ERROR, "Context %p is still generating", (void*)context);
-		return LLMD_ERR_INVALID;
+		llmd_log(host, LLMD_LOG_WARNING, "Context %p is still generating", (void*)context);
+		llmd_unbind_virtual_ctx(session, context);
+		context->generating = false;
 	}
 
 	if (context->type == LLMD_CONTEXT_DIRECT) {
@@ -633,5 +635,6 @@ llmd_end_generate(
 		);
 	}
 
+	ctx->generating = false;
 	return llmd_unbind_virtual_ctx(session, ctx);
 }

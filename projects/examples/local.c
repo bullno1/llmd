@@ -119,6 +119,7 @@ main(int argc, const char* argv[]) {
 	struct llmd_session* session = NULL;
 	struct llmd_context* context = NULL;
 	struct llmd_generate_handle* gen_handle = NULL;
+	llmd_token_t* prompt_buf = NULL;
 
 	LLMD_CHECK(llmd_begin_load_driver(NULL, driver_path, &loader));
 
@@ -158,7 +159,28 @@ main(int argc, const char* argv[]) {
 
 		fprintf(stderr, "[%d] = %d (%s)\n", i, tokens[i], str);
 	}
+
+	prompt_buf = malloc(sizeof(llmd_token_t) * (num_tokens + 1));
+	struct llmd_model_info model_info;
+	LLMD_CHECK(llmd_get_model_info(session, &model_info));
+	prompt_buf[0] = model_info.bos_token;
+	memcpy(prompt_buf + 1, tokens, sizeof(llmd_token_t) * num_tokens);
+
+	const float* logits;
+	LLMD_CHECK(llmd_begin_generate(context, &gen_handle));
+	LLMD_CHECK(llmd_generate_next(
+		gen_handle,
+		prompt_buf, num_tokens + 1,
+		0,
+		&logits
+	));
+	LLMD_CHECK(llmd_end_generate(gen_handle));
+	gen_handle = NULL;
 end:
+	if (prompt_buf != NULL) {
+		free(prompt_buf);
+	}
+
 	if (gen_handle != NULL) {
 		llmd_end_generate(gen_handle);
 	}
