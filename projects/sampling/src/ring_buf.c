@@ -2,6 +2,8 @@
 #include <llmd/utils/host.h>
 #include <string.h>
 #include <stdint.h>
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wsign-compare"
 #define HASHTABLE_IMPLEMENTATION
 #define HASHTABLE_MALLOC(ctx, size) llmd_malloc(ctx, size)
 #define HASHTABLE_FREE(ctx, size) llmd_free(ctx, size)
@@ -9,6 +11,7 @@
 #define HASHTABLE_ITEMCOPY(dst, src, size) *(unsigned int*)(dst) = *(unsigned int*)(src)
 #define HASHTABLE_KEYCMP(lhs, rhs, size) *(unsigned int*)(lhs) == *(unsigned int*)(rhs)
 #include <hashtable.h>
+#pragma clang diagnostic pop
 
 // From hashtable.h
 static uint32_t

@@ -97,7 +97,7 @@ llmd_llama_cpp_tokenize(
 
 	// Copy because we support non-null terminated string while llama.cpp
 	// requires it.
-	if (num_chars > llmd_buffer_size(driver->tmp_str_buf)) {
+	if (num_chars >= llmd_buffer_size(driver->tmp_str_buf)) {
 		driver->tmp_str_buf = llmd_realloc_buffer(driver->host, driver->tmp_str_buf, num_chars + 1);
 	}
 	memcpy(driver->tmp_str_buf->mem, string, num_chars);
@@ -110,9 +110,10 @@ llmd_llama_cpp_tokenize(
 	if (num_tokens < 0) {
 		*num_tokens_inout = -num_tokens;
 		return LLMD_ERR_BUF_SIZE;
+	} else {
+		*num_tokens_inout = num_tokens;
+		return LLMD_OK;
 	}
-
-	return LLMD_OK;
 }
 
 static enum llmd_error
@@ -128,13 +129,13 @@ llmd_llama_cpp_decode_token(
 
 	size_t len = strlen(str);
 	if (len > *num_chars_inout) {
+		*num_chars_inout = len;
 		return LLMD_ERR_BUF_SIZE;
+	} else {
+		memcpy(string_out, str, len);
+		*num_chars_inout = len;
+		return LLMD_OK;
 	}
-
-	memcpy(string_out, str, len);
-	*num_chars_inout = len;
-
-	return LLMD_OK;
 }
 
 static enum llmd_error
@@ -207,6 +208,7 @@ llmd_create_llama_cpp_driver(
 	);
 
 	if (model == NULL) {
+		llmd_log(host, LLMD_LOG_ERROR, "Could not load model");
 		llmd_free(host, driver);
 		return LLMD_ERR_IO;
 	}
@@ -287,7 +289,7 @@ llmd_set_driver_config(
 		} else {
 			return LLMD_ERR_INVALID;
 		}
-	} else if (strcmp(section, "llama") == 0) {
+	} else if (strcmp(section, "llama_cpp") == 0) {
 		if (strcmp(key, "n_ctx") == 0) {
 			return llmd_cfg_parse_int(value, 0, INT_MAX, &config->context_params.n_ctx);
 		} else if (strcmp(key, "n_threads") == 0) {

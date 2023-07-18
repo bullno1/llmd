@@ -427,7 +427,7 @@ llmd_tokenize(
 	struct llmd_driver* driver = ctx->session->driver;
 	struct llmd_host* host = ctx->session->host;
 
-	unsigned int num_tokens = llmd_buffer_size(ctx->token_buf);
+	unsigned int num_tokens = llmd_buffer_size(ctx->token_buf) / sizeof(llmd_token_t);
 	enum llmd_error status = driver->interface->tokenize(
 		driver,
 		string, num_chars,
@@ -450,7 +450,7 @@ llmd_tokenize(
 	}
 
 	if (tokens_out) {
-		*tokens_out = (void*)ctx->token_buf;
+		*tokens_out = (void*)ctx->token_buf->mem;
 	}
 
 	if (num_tokens_out) {
@@ -478,7 +478,7 @@ llmd_decode_token(
 		(void*)ctx->text_buf->mem, &num_chars
 	);
 
-	if (status == LLMD_ERR_BUF_SIZE || num_chars == existing_num_chars) {
+	if (status == LLMD_ERR_BUF_SIZE || num_chars >= existing_num_chars) {
 		// Need space for the null terminator
 		ctx->text_buf = llmd_realloc_buffer(
 			host, ctx->text_buf, (num_chars + 1) * sizeof(char)
@@ -489,11 +489,11 @@ llmd_decode_token(
 			driver->interface->decode_token(
 				driver,
 				token,
-				(void*)ctx->token_buf->mem, &num_chars
+				(void*)ctx->text_buf->mem, &num_chars
 			)
 		);
-		ctx->text_buf->mem[num_chars] = 0;
 	}
+	ctx->text_buf->mem[num_chars] = 0;
 
 	if (string_out) {
 		*string_out = ctx->text_buf->mem;

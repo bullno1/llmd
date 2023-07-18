@@ -20,7 +20,7 @@ llmd_realloc_buffer(
 		host, buffer, new_size + sizeof(struct llmd_buffer)
 	);
 
-	if (new_buffer) { buffer->size = new_size; }
+	if (new_buffer) { new_buffer->size = new_size; }
 
 	return new_buffer;
 }
