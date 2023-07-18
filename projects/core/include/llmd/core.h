@@ -188,7 +188,7 @@ llmd_generate_next(
 	const llmd_token_t* tokens,
 	unsigned int num_tokens,
 	unsigned int offset,
-	const float** logits_out
+	float* logits_out
 );
 
 LLMD_CORE_API enum llmd_error

@@ -46,7 +46,6 @@ struct llmd_context {
 	bool generating;
 
 	llmd_token_t* context_window;
-	float* logits;
 	struct llmd_buffer* token_buf;
 	struct llmd_buffer* text_buf;
 };
@@ -346,15 +345,12 @@ LLMD_TRY
 	struct llmd_host* host = session->host;
 
 	struct llmd_context* context = NULL;
-	float* logits = NULL;
 
 	LLMD_CHECKED_MALLOC(context, host, sizeof(struct llmd_context));
-	LLMD_CHECKED_MALLOC(logits, host, sizeof(*logits) * session->model_info.vocab_size);
 
 	*context = (struct llmd_context) {
 		.session = session,
 		.type = context_type,
-		.logits = logits,
 	};
 
 	if (context_type == LLMD_CONTEXT_DIRECT) {
@@ -372,7 +368,6 @@ LLMD_TRY
 
 	return LLMD_OK;
 LLMD_EXCEPT_BEGIN
-	llmd_free(host, logits);
 	llmd_free(host, context);
 LLMD_EXCEPT_END
 }
@@ -412,7 +407,6 @@ llmd_destroy_context(
 	llmd_free(host, context->text_buf);
 	llmd_free(host, context->token_buf);
 	llmd_free(host, context->context_window);
-	llmd_free(host, context->logits);
 	llmd_free(host, context);
 
 	return LLMD_OK;
@@ -533,7 +527,7 @@ llmd_generate_next(
 	const llmd_token_t* tokens,
 	unsigned int num_tokens,
 	unsigned int offset,
-	const float** logits_out
+	float* logits_out
 ) {
 	struct llmd_context* ctx = (struct llmd_context*)generate_handle;
 	struct llmd_session* session = ctx->session;
@@ -556,7 +550,7 @@ llmd_generate_next(
 				driver,
 				ctx->physical_ctx->descriptor,
 				tokens, num_tokens, offset,
-				ctx->logits
+				logits_out
 			)
 		);
 	} else {
@@ -601,13 +595,9 @@ llmd_generate_next(
 				ctx->physical_ctx->descriptor,
 				ctx->physical_ctx->context_window + eval_offset,
 				eval_len, eval_offset,
-				ctx->logits
+				logits_out
 			)
 		);
-	}
-
-	if (logits_out) {
-		*logits_out = ctx->logits;
 	}
 
 	return LLMD_OK;

@@ -120,6 +120,7 @@ main(int argc, const char* argv[]) {
 	struct llmd_context* context = NULL;
 	struct llmd_generate_handle* gen_handle = NULL;
 	llmd_token_t* prompt_buf = NULL;
+	struct llmd_sampling_candidates candidates = { 0 };
 
 	LLMD_CHECK(llmd_begin_load_driver(NULL, driver_path, &loader));
 
@@ -166,17 +167,64 @@ main(int argc, const char* argv[]) {
 	prompt_buf[0] = model_info.bos_token;
 	memcpy(prompt_buf + 1, tokens, sizeof(llmd_token_t) * num_tokens);
 
-	const float* logits;
+	candidates.scores = malloc(sizeof(float) * model_info.vocab_size);
+	candidates.ids = malloc(sizeof(llmd_token_t) * model_info.vocab_size);
+
+	struct llmd_sampling_default_rng_state rng_state;
+	struct llmd_sampling_mirostat_v2_state mirostat = {
+		.tau = 5.f,
+		.eta = 0.1f,
+		.mu = 10.f,
+	};
+
 	LLMD_CHECK(llmd_begin_generate(context, &gen_handle));
 	LLMD_CHECK(llmd_generate_next(
 		gen_handle,
 		prompt_buf, num_tokens + 1,
 		0,
-		&logits
+		candidates.scores
 	));
+	unsigned int offset = num_tokens + 1;
+
+	// TODO: better seed
+	struct llmd_sampling_rng rng = llmd_sampling_init_default_rng(&rng_state, 0);
+	(void)rng;
+	(void)mirostat;
+	while (true) {
+		for (unsigned int i = 0; i < model_info.vocab_size; ++i) {
+			candidates.ids[i] = i;
+		}
+		candidates.num_candidates = model_info.vocab_size;
+		candidates.sorted = false;
+
+		llmd_sampling_apply_temperature(&candidates, 0.8f);
+		llmd_token_t next_token = llmd_sampling_pick_max_score(&candidates);
+
+		if (next_token == model_info.eos_token) {
+			break;
+		}
+
+		const char* text;
+		LLMD_CHECK(llmd_decode_token(context, next_token, &text, NULL));
+		printf("%s", text);
+		fflush(stdout);
+
+		LLMD_CHECK(llmd_generate_next(
+			gen_handle,
+			&next_token, 1,
+			offset++,
+			candidates.scores
+		));
+	}
+
 	LLMD_CHECK(llmd_end_generate(gen_handle));
 	gen_handle = NULL;
 end:
+	if (candidates.scores) {
+		free(candidates.scores);
+		free(candidates.ids);
+	}
+
 	if (prompt_buf != NULL) {
 		free(prompt_buf);
 	}
