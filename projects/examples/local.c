@@ -188,8 +188,6 @@ main(int argc, const char* argv[]) {
 
 	// TODO: better seed
 	struct llmd_sampling_rng rng = llmd_sampling_init_default_rng(&rng_state, 0);
-	(void)rng;
-	(void)mirostat;
 	while (true) {
 		for (unsigned int i = 0; i < model_info.vocab_size; ++i) {
 			candidates.ids[i] = i;
@@ -199,7 +197,7 @@ main(int argc, const char* argv[]) {
 
 		llmd_sampling_apply_temperature(&candidates, 0.8f);
 		llmd_sampling_apply_softmax(&candidates);
-		llmd_token_t next_token = llmd_sampling_pick_weighted_random(&candidates, &rng);
+		llmd_token_t next_token = llmd_sampling_pick_mirostat_v2(&candidates, &rng, &mirostat);
 
 		if (next_token == model_info.eos_token) {
 			break;
