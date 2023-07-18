@@ -17,27 +17,48 @@
 #    define LLMD_LOADER_API
 #endif
 
-struct llmd_loader_handle {
-	struct llmd_driver* driver;
-	void* internal;
-};
+struct llmd_driver_loader;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 LLMD_LOADER_API enum llmd_error
-llmd_load_driver(
+llmd_begin_load_driver(
 	struct llmd_host* host,
 	const char* driver_path,
-	const char* config_file_path,
-	const char* config_file_content,
-	struct llmd_loader_handle* loader_handle
+	struct llmd_driver_loader** loader_out
+);
+
+LLMD_LOADER_API enum llmd_error
+llmd_config_driver(
+	struct llmd_driver_loader* loader,
+	const char* section,
+	const char* key,
+	const char* value
+);
+
+LLMD_LOADER_API enum llmd_error
+llmd_load_driver_config_from_file(
+	struct llmd_driver_loader* loader,
+	const char* ini_file
+);
+
+LLMD_LOADER_API enum llmd_error
+llmd_load_driver_config_from_string(
+	struct llmd_driver_loader* loader,
+	const char* ini_string
+);
+
+LLMD_LOADER_API enum llmd_error
+llmd_end_load_driver(
+	struct llmd_driver_loader* loader,
+	struct llmd_driver** driver_out
 );
 
 LLMD_LOADER_API enum llmd_error
 llmd_unload_driver(
-	struct llmd_loader_handle* loader_handle
+	struct llmd_driver_loader* loader
 );
 
 #ifdef __cplusplus

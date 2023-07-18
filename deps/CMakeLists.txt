@@ -4,3 +4,4 @@ endif ()
 
 include(llama_cpp.cmake)
 include(inih.cmake)
+add_subdirectory(vendor)
