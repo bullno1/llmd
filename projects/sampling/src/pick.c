@@ -14,9 +14,9 @@ llmd_sampling_pick_weighted_random_idx(
 	float threshold = rng->next(rng->state) * sum;
 
 	for (unsigned int i = 0; i < candidates->num_candidates; ++i) {
-		sum -= threshold;
+		threshold -= candidates->scores[i];
 
-		if (sum <= 0) {
+		if (threshold <= 0) {
 			return i;
 		}
 	}

@@ -198,7 +198,8 @@ main(int argc, const char* argv[]) {
 		candidates.sorted = false;
 
 		llmd_sampling_apply_temperature(&candidates, 0.8f);
-		llmd_token_t next_token = llmd_sampling_pick_max_score(&candidates);
+		llmd_sampling_apply_softmax(&candidates);
+		llmd_token_t next_token = llmd_sampling_pick_weighted_random(&candidates, &rng);
 
 		if (next_token == model_info.eos_token) {
 			break;
