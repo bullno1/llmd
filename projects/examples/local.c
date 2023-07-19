@@ -120,7 +120,13 @@ main(int argc, const char* argv[]) {
 	struct llmd_context* context = NULL;
 	struct llmd_generate_handle* gen_handle = NULL;
 	llmd_token_t* prompt_buf = NULL;
-	struct llmd_sampling_candidates candidates = { 0 };
+	float* scratch_buf = NULL;
+	float* logits = NULL;
+	struct llmd_sampling_mirostat_v2_state mirostat = {
+		.tau = 5.f,
+		.eta = 0.1f,
+		.mu = 10.f,
+	};
 
 	LLMD_CHECK(llmd_begin_load_driver(NULL, driver_path, &loader));
 
@@ -147,6 +153,13 @@ main(int argc, const char* argv[]) {
 
 	LLMD_CHECK(llmd_end_load_driver(loader, &driver));
 	LLMD_CHECK(llmd_create_session(NULL, driver, &session));
+
+	struct llmd_model_info model_info;
+	LLMD_CHECK(llmd_get_model_info(session, &model_info));
+	logits = malloc(sizeof(float) * model_info.vocab_size);
+	scratch_buf = malloc(sizeof(float) * model_info.vocab_size);
+	mirostat.scratch_buf = scratch_buf;
+
 	LLMD_CHECK(llmd_create_context(session, LLMD_CONTEXT_MIN_UPLOAD, &context));
 
 	const llmd_token_t* tokens;
@@ -162,42 +175,27 @@ main(int argc, const char* argv[]) {
 	}
 
 	prompt_buf = malloc(sizeof(llmd_token_t) * (num_tokens + 1));
-	struct llmd_model_info model_info;
-	LLMD_CHECK(llmd_get_model_info(session, &model_info));
 	prompt_buf[0] = model_info.bos_token;
 	memcpy(prompt_buf + 1, tokens, sizeof(llmd_token_t) * num_tokens);
 
-	candidates.scores = malloc(sizeof(float) * model_info.vocab_size);
-	candidates.ids = malloc(sizeof(llmd_token_t) * model_info.vocab_size);
-
 	struct llmd_sampling_default_rng_state rng_state;
-	struct llmd_sampling_mirostat_v2_state mirostat = {
-		.tau = 5.f,
-		.eta = 0.1f,
-		.mu = 10.f,
-	};
 
 	LLMD_CHECK(llmd_begin_generate(context, &gen_handle));
 	LLMD_CHECK(llmd_generate_next(
 		gen_handle,
 		prompt_buf, num_tokens + 1,
 		0,
-		candidates.scores
+		logits
 	));
 	unsigned int offset = num_tokens + 1;
 
 	// TODO: better seed
 	struct llmd_sampling_rng rng = llmd_sampling_init_default_rng(&rng_state, 0);
 	while (true) {
-		for (unsigned int i = 0; i < model_info.vocab_size; ++i) {
-			candidates.ids[i] = i;
-		}
-		candidates.num_candidates = model_info.vocab_size;
-		candidates.sorted = false;
-
-		llmd_sampling_apply_temperature(&candidates, 0.8f);
-		llmd_sampling_apply_softmax(&candidates);
-		llmd_token_t next_token = llmd_sampling_pick_mirostat_v2(&candidates, &rng, &mirostat);
+		llmd_sampling_apply_temperature(model_info.vocab_size, logits, 0.8f);
+		llmd_token_t next_token = llmd_sampling_pick_mirostat_v2(
+			model_info.vocab_size, logits, &rng, &mirostat
+		);
 
 		if (next_token == model_info.eos_token) {
 			break;
@@ -212,16 +210,19 @@ main(int argc, const char* argv[]) {
 			gen_handle,
 			&next_token, 1,
 			offset++,
-			candidates.scores
+			logits
 		));
 	}
 
 	LLMD_CHECK(llmd_end_generate(gen_handle));
 	gen_handle = NULL;
 end:
-	if (candidates.scores) {
-		free(candidates.scores);
-		free(candidates.ids);
+	if (scratch_buf) {
+		free(scratch_buf);
+	}
+
+	if (logits) {
+		free(logits);
 	}
 
 	if (prompt_buf != NULL) {

@@ -2,7 +2,6 @@ add_library(llmd_sampling
 	"src/rng.c"
 	"src/ring_buf.c"
 	"src/transform.c"
-	"src/filter.c"
 	"src/pick.c"
 )
 

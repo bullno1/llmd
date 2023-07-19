@@ -3,42 +3,43 @@
 #include <math.h>
 
 void
-llmd_sampling_apply_softmax(struct llmd_sampling_candidates* candidates) {
+llmd_sampling_softmax(unsigned int num_items, const float* input, float* output) {
 	float max_score = -INFINITY;
-	for (unsigned int i = 0; i < candidates->num_candidates; ++i) {
-		if (candidates->scores[i] > max_score) {
-			max_score = candidates->scores[i];
+	for (unsigned int i = 0; i < num_items; ++i) {
+		if (input[i] > max_score) {
+			max_score = input[i];
 		}
 	}
 
 	float sum = 0.f;
-	for (unsigned int i = 0; i < candidates->num_candidates; ++i) {
-		float p = expf(candidates->scores[i] - max_score);
+	for (unsigned int i = 0; i < num_items; ++i) {
+		float p = expf(input[i] - max_score);
 		sum += p;
-		candidates->scores[i] = p;
+		output[i] = p;
 	}
 
-	for (unsigned int i = 0; i < candidates->num_candidates; ++i) {
-		candidates->scores[i] /= sum;
+	for (unsigned int i = 0; i < num_items; ++i) {
+		output[i] /= sum;
 	}
 }
 
 void
 llmd_sampling_apply_temperature(
-	struct llmd_sampling_candidates* candidates,
+	unsigned int num_items, float* logits,
 	float temperature
 ) {
-	for (unsigned int i = 0; i < candidates->num_candidates; ++i) {
-		candidates->scores[i] /= temperature;
+	for (unsigned int i = 0; i < num_items; ++i) {
+		logits[i] /= temperature;
 	}
 }
 
 void
 llmd_sampling_apply_repetition_penalties(
-	struct llmd_sampling_candidates* candidates,
+	unsigned int num_items, float* logits,
 	struct llmd_sampling_ring_buf* recent_tokens,
 	float penalty
 ) {
+	(void)num_items;
 	for (
 		unsigned int i = 0;
 		i < llmd_sampling_ring_buf_num_unique_tokens(recent_tokens);
@@ -48,22 +49,19 @@ llmd_sampling_apply_repetition_penalties(
 		unsigned int frequency;
 		llmd_sampling_ring_buf_get_unique_token(recent_tokens, i, &token, &frequency);
 
-		float score = candidates->scores[token];
-		if (score > 0) {
-			candidates->scores[token] = score / penalty;
-		} else {
-			candidates->scores[token] = score * penalty;
-		}
+		float logit = logits[token];
+		logits[token] = logit > 0 ? logit / penalty : logit * penalty;
 	}
 }
 
 void
 llmd_sampling_apply_frequency_and_presence_penalties(
-	struct llmd_sampling_candidates* candidates,
+	unsigned int num_items, float* logits,
 	struct llmd_sampling_ring_buf* recent_tokens,
 	float alpha_frequency,
 	float alpha_presence
 ) {
+	(void)num_items;
 	for (
 		unsigned int i = 0;
 		i < llmd_sampling_ring_buf_num_unique_tokens(recent_tokens);
@@ -73,6 +71,6 @@ llmd_sampling_apply_frequency_and_presence_penalties(
 		unsigned int frequency;
 		llmd_sampling_ring_buf_get_unique_token(recent_tokens, i, &token, &frequency);
 
-		candidates->scores[token] -= (float)frequency * alpha_frequency + (float)(frequency > 0) * alpha_presence;
+		logits[token] -= (float)frequency * alpha_frequency + (float)(frequency > 0) * alpha_presence;
 	}
 }

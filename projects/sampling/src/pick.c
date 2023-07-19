@@ -1,49 +1,39 @@
 #include <llmd/sampling.h>
 #include <math.h>
 
-static inline unsigned int
-llmd_sampling_pick_weighted_random_idx(
-	struct llmd_sampling_candidates* candidates,
+llmd_token_t
+llmd_sampling_pick_weighted_random(
+	unsigned int num_items, const float* scores,
 	struct llmd_sampling_rng* rng
 ) {
 	float sum = 0.f;
-	for (unsigned int i = 0; i < candidates->num_candidates; ++i) {
-		sum += candidates->scores[i];
+	for (unsigned int i = 0; i < num_items; ++i) {
+		sum += scores[i];
 	}
 
 	float threshold = rng->next(rng->state) * sum;
 
-	for (unsigned int i = 0; i < candidates->num_candidates; ++i) {
-		threshold -= candidates->scores[i];
+	for (unsigned int i = 0; i < num_items; ++i) {
+		threshold -= scores[i];
 
 		if (threshold <= 0) {
 			return i;
 		}
 	}
 
-	return candidates->num_candidates > 0
-		? candidates->num_candidates - 1
-		: 0;
+	return 0;
 }
 
 llmd_token_t
-llmd_sampling_pick_weighted_random(
-	struct llmd_sampling_candidates* candidates,
-	struct llmd_sampling_rng* rng
-) {
-	return candidates->ids[llmd_sampling_pick_weighted_random_idx(candidates, rng)];
-}
-
-llmd_token_t
-llmd_sampling_pick_max_score(
-	struct llmd_sampling_candidates* candidates
+llmd_sampling_pick_argmax(
+	unsigned int num_items, const float* scores
 ) {
 	float max_score = -INFINITY;
 	llmd_token_t token = LLMD_INVALID_TOKEN;
-	for (unsigned int i = 0; i < candidates->num_candidates; ++i) {
-		if (candidates->scores[i] > max_score) {
-			max_score = candidates->scores[i];
-			token = candidates->ids[i];
+	for (unsigned int i = 0; i < num_items; ++i) {
+		if (scores[i] > max_score) {
+			max_score = scores[i];
+			token = i;
 		}
 	}
 
@@ -52,43 +42,34 @@ llmd_sampling_pick_max_score(
 
 LLMD_SAMPLING_API llmd_token_t
 llmd_sampling_pick_mirostat_v2(
-	struct llmd_sampling_candidates* candidates,
+	unsigned int num_items, const float* logits,
 	struct llmd_sampling_rng* rng,
 	struct llmd_sampling_mirostat_v2_state* mirostat_v2
 ) {
+	float* scratch_buf = mirostat_v2->scratch_buf;
+	llmd_sampling_softmax(num_items, logits, scratch_buf);
+
 	float mu = mirostat_v2->mu;
-	unsigned int size = candidates->num_candidates;
-	float excluded_scores = 0.f;
-	float sum = 0.f;
-	for (unsigned int i = 0; i < size; ++i) {
-		float score = candidates->scores[i];
+	unsigned int num_items_left = num_items;
+	for (unsigned int i = 0; i < num_items; ++i) {
+		float score = scratch_buf[i];
 		float surprise = -log2f(score);
-		sum += score;
-		if (surprise > mu && size > 1) {
-			excluded_scores += score;
-			// Overwrite with the last element
-			size -= 1;
-			candidates->scores[i] = candidates->scores[size];
-			candidates->ids[i] = candidates->ids[size];
-		}
 
-		if (size == 1) {
-			break;
+		if (surprise > mu && num_items_left > 1) {
+			--num_items_left;
+			scratch_buf[i] = -INFINITY;
+		} else {
+			scratch_buf[i] = logits[i];
 		}
 	}
-	candidates->sorted = false;
-	candidates->num_candidates = size;
 
-	float new_sum = sum - excluded_scores;
-	for (unsigned int i = 0; i < size; ++i) {
-		candidates->scores[i] /= new_sum;
-	}
+	llmd_sampling_softmax(num_items, scratch_buf, scratch_buf);
 
-	unsigned int chosen_idx = llmd_sampling_pick_weighted_random_idx(candidates, rng);
+	llmd_token_t token = llmd_sampling_pick_weighted_random(num_items, scratch_buf, rng);
 
-	float observed_surprise = -log2f(candidates->scores[chosen_idx]);
+	float observed_surprise = -log2f(scratch_buf[token]);
 	float error = observed_surprise - mirostat_v2->tau;
 	mirostat_v2->mu = mu - mirostat_v2->eta * error;
 
-	return candidates->ids[chosen_idx];
+	return token;
 }

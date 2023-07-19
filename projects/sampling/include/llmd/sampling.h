@@ -25,13 +25,6 @@ struct llmd_sampling_default_rng_state {
 	uint64_t state[2];
 };
 
-struct llmd_sampling_candidates {
-	unsigned int num_candidates;
-	float* scores;
-	llmd_token_t* ids;
-	bool sorted;
-};
-
 struct llmd_sampling_rng {
 	float (*next)(void* state);
 	void* state;
@@ -43,6 +36,7 @@ struct llmd_sampling_mirostat_v2_state {
 	float tau;
 	float eta;
 	float mu;
+	float* scratch_buf;
 };
 
 #ifdef __cplusplus
@@ -93,18 +87,18 @@ llmd_sampling_ring_buf_get_unique_token(
 // Transform
 
 LLMD_SAMPLING_API void
-llmd_sampling_apply_softmax(struct llmd_sampling_candidates* candidates);
+llmd_sampling_softmax(unsigned int num_items, const float* input, float* output);
 
 LLMD_SAMPLING_API void
 llmd_sampling_apply_repetition_penalties(
-	struct llmd_sampling_candidates* candidates,
+	unsigned int num_items, float* logits,
 	struct llmd_sampling_ring_buf* recent_tokens,
 	float penalty
 );
 
 LLMD_SAMPLING_API void
 llmd_sampling_apply_frequency_and_presence_penalties(
-	struct llmd_sampling_candidates* candidates,
+	unsigned int num_items, float* logits,
 	struct llmd_sampling_ring_buf* recent_tokens,
 	float alpha_frequency,
 	float alpha_presence
@@ -112,41 +106,26 @@ llmd_sampling_apply_frequency_and_presence_penalties(
 
 LLMD_SAMPLING_API void
 llmd_sampling_apply_temperature(
-	struct llmd_sampling_candidates* candidates,
+	unsigned int num_items, float* logits,
 	float temperature
-);
-
-// Filter
-
-LLMD_SAMPLING_API void
-llmd_sampling_filter_top_k(
-	struct llmd_sampling_candidates* candidates,
-	unsigned int k
-);
-
-LLMD_SAMPLING_API void
-llmd_sampling_filter_top_p(
-	struct llmd_sampling_candidates* candidates,
-	float p,
-	unsigned int min_keep
 );
 
 // Pick
 
 LLMD_SAMPLING_API llmd_token_t
 llmd_sampling_pick_weighted_random(
-	struct llmd_sampling_candidates* candidates,
+	unsigned int num_items, const float* scores,
 	struct llmd_sampling_rng* rng
 );
 
 LLMD_SAMPLING_API llmd_token_t
-llmd_sampling_pick_max_score(
-	struct llmd_sampling_candidates* candidates
+llmd_sampling_pick_argmax(
+	unsigned int num_items, const float* logits
 );
 
 LLMD_SAMPLING_API llmd_token_t
 llmd_sampling_pick_mirostat_v2(
-	struct llmd_sampling_candidates* candidates,
+	unsigned int num_items, const float* logits,
 	struct llmd_sampling_rng* rng,
 	struct llmd_sampling_mirostat_v2_state* mirostat_v2
 );
