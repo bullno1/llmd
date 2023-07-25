@@ -1,6 +1,6 @@
 set(SOURCES "src/llama_cpp.c")
 
-setup_library(llmd_llama_cpp LLMD_LLAMA_CPP_STATIC ${SOURCES})
+setup_library(llmd_llama_cpp ${LLMD_LLAMA_CPP_STATIC} ${SOURCES})
 
 target_include_directories(llmd_llama_cpp PUBLIC "./include")
 target_link_libraries(llmd_llama_cpp PUBLIC llmd_core_interface)
