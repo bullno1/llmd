@@ -276,12 +276,13 @@ llmd_set_driver_config(
 ) {
 	if (strcmp(section, "main") == 0) {
 		if (strcmp(key, "model_path") == 0) {
-			size_t len = strlen(value) + 1;
-			config->model_path = llmd_malloc(host, strlen(value) + 1);
+			size_t len = strlen(value);
+			config->model_path = llmd_malloc(host, len + 1);
 			if (!config->model_path) {
 				return LLMD_ERR_OOM;
 			}
 			memcpy((void*)config->model_path, value, len);
+			*(char*)(&config->model_path[len]) = '\0';
 			return LLMD_OK;
 		} else if (strcmp(key, "max_contexts") == 0){
 			return llmd_cfg_parse_uint(value, 0, INT_MAX, &config->max_contexts);
@@ -340,10 +341,12 @@ llmd_destroy_driver(
 	struct llmd_driver* header
 ) {
 	struct llmd_llama_cpp_driver* driver = (struct llmd_llama_cpp_driver*)header;
+	struct llmd_host* host = driver->host;
+	struct llmd_llama_cpp_driver_config* config = driver->config;
 
-	enum llmd_error status =  llmd_destroy_llama_cpp_driver(header);
-	llmd_free(driver->host, (void*)driver->config->model_path);
-	llmd_free(driver->host, driver->config);
+	llmd_destroy_llama_cpp_driver(header);
+	llmd_free(host, (void*)config->model_path);
+	llmd_free(host, config);
 
-	return status;
+	return LLMD_OK;
 }

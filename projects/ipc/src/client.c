@@ -502,3 +502,76 @@ llmd_destroy_ipc_client(
 	llmd_free(client->host, client);
 	return LLMD_OK;
 }
+
+enum llmd_error
+llmd_begin_create_driver(
+	struct llmd_host* host,
+	struct llmd_ipc_client_config** config_out
+) {
+	struct llmd_ipc_client_config* config = llmd_malloc(
+		host,
+		sizeof(struct llmd_ipc_client_config)
+	);
+	memset(config, 0, sizeof(*config));
+
+	*config_out = config;
+	return LLMD_OK;
+}
+
+enum llmd_error
+llmd_set_driver_config(
+	struct llmd_host* host,
+	struct llmd_ipc_client_config* config,
+	const char* section,
+	const char* key,
+	const char* value
+) {
+	if (strcmp(section, "main") == 0) {
+		if (strcmp(key, "name") == 0) {
+			size_t len = strlen(value);
+			config->name = llmd_malloc(host, len + 1);
+			if (!config->name) {
+				return LLMD_ERR_OOM;
+			}
+			memcpy((void*)config->name, value, len);
+			*(char*)(&config->name[len]) = '\0';
+			return LLMD_OK;
+		} else {
+			return LLMD_ERR_INVALID;
+		}
+	} else if (strcmp(section, "llmd") == 0) {
+		return LLMD_OK;
+	} else {
+		return LLMD_ERR_INVALID;
+	}
+}
+
+enum llmd_error
+llmd_end_create_driver(
+	struct llmd_host* host,
+	struct llmd_ipc_client_config* config,
+	struct llmd_driver** driver_out
+) {
+	if (driver_out == NULL) {
+		llmd_free(host, (void*)config->name);
+		llmd_free(host, config);
+		return LLMD_OK;
+	} else {
+		return llmd_create_ipc_client(host, config, driver_out);
+	}
+}
+
+enum llmd_error
+llmd_destroy_driver(
+	struct llmd_driver* header
+) {
+	struct llmd_ipc_client* client = (struct llmd_ipc_client*)header;
+	struct llmd_host* host = client->host;
+	struct llmd_ipc_client_config* config = client->config;
+
+	llmd_destroy_ipc_client(header);
+	llmd_free(host, (void*)config->name);
+	llmd_free(host, config);
+
+	return LLMD_OK;
+}
