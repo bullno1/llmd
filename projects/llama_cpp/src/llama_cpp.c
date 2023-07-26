@@ -188,7 +188,6 @@ llmd_create_llama_cpp_driver(
 	struct llmd_llama_cpp_driver_config* config,
 	struct llmd_driver** driver_out
 ) {
-
 	if (host == NULL) {
 		host = &llmd_default_host;
 	}

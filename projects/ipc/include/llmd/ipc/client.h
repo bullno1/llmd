@@ -17,7 +17,7 @@
 #    define LLMD_IPC_CLIENT_API
 #endif
 
-struct llmd_ipc_driver_config {
+struct llmd_ipc_client_config {
 	const char* name;
 };
 
@@ -26,14 +26,14 @@ extern "C" {
 #endif
 
 LLMD_IPC_CLIENT_API enum llmd_error
-llmd_create_ipc_driver(
+llmd_create_ipc_client(
 	struct llmd_host* host,
-	struct llmd_ipc_driver_config* config,
+	struct llmd_ipc_client_config* config,
 	struct llmd_driver** driver_out
 );
 
 LLMD_IPC_CLIENT_API enum llmd_error
-llmd_destroy_ipc_driver(
+llmd_destroy_ipc_client(
 	struct llmd_driver* driver
 );
 
@@ -42,13 +42,13 @@ llmd_destroy_ipc_driver(
 LLMD_IPC_CLIENT_API enum llmd_error
 llmd_begin_create_driver(
 	struct llmd_host* host,
-	struct llmd_ipc_driver_config** config
+	struct llmd_ipc_client_config** config
 );
 
 LLMD_IPC_CLIENT_API enum llmd_error
 llmd_set_driver_config(
 	struct llmd_host* host,
-	struct llmd_ipc_driver_config* config,
+	struct llmd_ipc_client_config* config,
 	const char* section,
 	const char* key,
 	const char* value
@@ -57,7 +57,7 @@ llmd_set_driver_config(
 LLMD_IPC_CLIENT_API enum llmd_error
 llmd_end_create_driver(
 	struct llmd_host* host,
-	struct llmd_ipc_driver_config* config,
+	struct llmd_ipc_client_config* config,
 	struct llmd_driver** driver_out
 );
 

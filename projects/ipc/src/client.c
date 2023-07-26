@@ -1,1 +1,504 @@
+#include "llmd/core.h"
+#include "common.h"
 #include <llmd/ipc/client.h>
+#include <llmd/utils/host.h>
+#include <stdint.h>
+
+#include <limits.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+#define LLMD_TMP_BUF_SIZE 1024
+#define LLMD_CHECK(op) if ((status = (op)) != LLMD_OK) { return status; }
+#define LLMD_IO_CHECK(op) if (!(op)) { return LLMD_ERR_IO; }
+#define LLMD_SYSCALL_CHECK(op) \
+	if ((op) < 0) { \
+		llmd_log(client->host, LLMD_LOG_ERROR, #op " returns %s", strerror(errno)); \
+		return LLMD_ERR_IO; \
+	}
+
+struct llmd_span {
+	void* ptr;
+	size_t size;
+};
+
+struct llmd_ipc_context {
+	int descriptor;
+
+	struct llmd_span context_window;
+	struct llmd_span logits;
+};
+
+struct llmd_ipc_client {
+	struct llmd_driver header;
+	struct llmd_host* host;
+	struct llmd_ipc_client_config* config;
+
+	int ipc_sock;
+
+	struct llmd_span session_mem;
+	unsigned int num_contexts;
+	struct llmd_ipc_context* contexts;
+};
+
+struct llmd_rpc_call {
+	char tmp_buf[LLMD_TMP_BUF_SIZE];
+	size_t buf_size;
+	size_t buf_cursor;
+};
+
+static enum llmd_error
+llmd_ipc_setup_shared_mem(
+	struct llmd_ipc_client* client,
+	struct llmd_span* shared_mem,
+	int fd
+) {
+	struct stat stat;
+	LLMD_SYSCALL_CHECK(fstat(fd, &stat));
+	shared_mem->ptr = mmap(
+		NULL,
+		stat.st_size,
+		PROT_READ | PROT_WRITE,
+		MAP_SHARED,
+		fd,
+		0
+	);
+	shared_mem->size = stat.st_size;
+	if (shared_mem->ptr == MAP_FAILED) {
+		llmd_log(client->host, LLMD_LOG_ERROR, "mmap() returns %s", strerror(errno));
+		shared_mem->ptr = NULL;
+		shared_mem->size = 0;
+		return LLMD_ERR_IO;
+	}
+
+	return LLMD_OK;
+}
+
+static enum llmd_error
+llmd_ipc_cleanup_shared_mem(
+	struct llmd_span* shared_mem
+) {
+	if (shared_mem->ptr != NULL) {
+		munmap(shared_mem->ptr, shared_mem->size);
+		shared_mem->ptr = NULL;
+		shared_mem->size = 0;
+	}
+
+	return LLMD_OK;
+}
+
+static enum llmd_error
+llmd_rpc_read(struct llmd_rpc_call* call, void* data, size_t size) {
+	if (call->buf_cursor + size > call->buf_size) {
+		return LLMD_ERR_IO;
+	}
+
+	memcpy(data, call->tmp_buf + call->buf_cursor, size);
+
+	call->buf_cursor += size;
+	return LLMD_OK;
+}
+
+static enum llmd_error
+llmd_rpc_write(struct llmd_rpc_call* call, const void* data, size_t size) {
+	if (call->buf_cursor + size > call->buf_size) {
+		return LLMD_ERR_IO;
+	}
+
+	memcpy(call->tmp_buf + call->buf_cursor, data, size);
+
+	call->buf_cursor += size;
+	return LLMD_OK;
+}
+
+static enum llmd_error
+llmd_ipc_begin_call(
+	struct llmd_ipc_client* client,
+	enum llmd_rpc_method method,
+	struct llmd_rpc_call* call_out
+) {
+	(void)client;
+	call_out->buf_size = sizeof(call_out->tmp_buf);
+	call_out->buf_cursor = 0;
+
+	struct llmd_rpc_request_header header = {
+		.version = LLMD_RPC_VERSION,
+		.method = method,
+	};
+
+	return llmd_rpc_write(call_out, &header, sizeof(header));
+}
+
+static enum llmd_error
+llmd_ipc_end_call(
+	struct llmd_ipc_client* client,
+	struct llmd_rpc_call* call,
+	unsigned int num_fds,
+	int* fds_out
+) {
+	enum llmd_error status;
+	if (num_fds > LLMD_MAX_NUM_FDS) {
+		return LLMD_ERR_INVALID;
+	}
+
+	struct iovec iov = {
+		.iov_base = call->tmp_buf,
+		.iov_len = call->buf_cursor
+	};
+	struct msghdr msg = {
+		.msg_iov = &iov,
+		.msg_iovlen = 1,
+	};
+	LLMD_SYSCALL_CHECK(sendmsg(client->ipc_sock, &msg, 0));
+
+	union {
+		char buf[CMSG_SPACE(sizeof(int) * LLMD_MAX_NUM_FDS)];
+		struct cmsghdr align;
+	} u;
+
+	msg.msg_control = u.buf;
+	msg.msg_controllen = CMSG_LEN(sizeof(int) * num_fds);
+	iov.iov_len = sizeof(call->tmp_buf);
+	LLMD_SYSCALL_CHECK(recvmsg(client->ipc_sock, &msg, 0));
+
+	struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+	if (num_fds > 0 && cmsg == NULL) {
+		return LLMD_ERR_IO;
+	}
+
+	if (cmsg != NULL
+		&& (cmsg->cmsg_level != SOL_SOCKET
+			|| cmsg->cmsg_type != SCM_RIGHTS
+			|| cmsg->cmsg_len != CMSG_LEN(sizeof(int) * num_fds)
+		)
+	) {
+		return LLMD_ERR_IO;
+	}
+
+	memcpy(fds_out, CMSG_DATA(cmsg), num_fds * sizeof(int));
+
+	call->buf_cursor = 0;
+	call->buf_size = iov.iov_len;
+
+	struct llmd_rpc_response_header header;
+	LLMD_CHECK(llmd_rpc_read(call, &header, sizeof(header)));
+
+	return header.error;
+}
+
+static enum llmd_error
+llmd_init_ipc_client(
+	struct llmd_ipc_client* client
+) {
+	enum llmd_error status;
+
+	LLMD_SYSCALL_CHECK(client->ipc_sock = socket(AF_UNIX, SOCK_SEQPACKET, 0));
+
+	struct sockaddr_un address = {
+		.sun_family = AF_UNIX,
+	};
+	size_t name_len = strlen(client->config->name);
+	if (name_len > sizeof(address.sun_path) - 2) {
+		return LLMD_ERR_INVALID;
+	}
+	address.sun_path[0] = '\0';
+	memcpy(address.sun_path + 1, client->config->name, name_len);
+	address.sun_path[name_len + 1] = '\0';
+	LLMD_SYSCALL_CHECK(
+		connect(client->ipc_sock, (struct sockaddr *)&address, sizeof(address))
+	);
+
+	struct llmd_rpc_call call;
+	LLMD_CHECK(llmd_ipc_begin_call(client, LLMD_RPC_BEGIN_SESSION, &call));
+	int fd = -1;
+	LLMD_CHECK(llmd_ipc_end_call(client, &call, 1, &fd));
+
+	status = llmd_ipc_setup_shared_mem(client, &client->session_mem, fd);
+	close(fd);
+
+	return status;
+}
+
+static enum llmd_error
+llmd_ipc_client_tokenize(
+	struct llmd_driver* header,
+	const char* string,
+	unsigned int num_chars,
+	llmd_token_t* tokens_out,
+	unsigned int* num_tokens_inout
+) {
+	enum llmd_error status;
+	struct llmd_ipc_client* client = (struct llmd_ipc_client*)header;
+
+	if (num_chars > client->session_mem.size) {
+		return LLMD_ERR_INVALID;
+	}
+
+	memcpy(client->session_mem.ptr, string, num_chars);
+
+	struct llmd_rpc_call call;
+	LLMD_CHECK(llmd_ipc_begin_call(client, LLMD_RPC_TOKENIZE, &call));
+	LLMD_CHECK(llmd_rpc_write(&call, &num_chars, sizeof(num_chars)));
+	LLMD_CHECK(llmd_ipc_end_call(client, &call, 0, NULL));
+
+	unsigned int num_tokens;
+	LLMD_CHECK(llmd_rpc_read(&call, &num_tokens, sizeof(num_tokens)));
+	if (num_tokens > *num_tokens_inout) {
+		*num_tokens_inout = num_tokens;
+		return LLMD_ERR_BUF_SIZE;
+	} else {
+		memcpy(tokens_out, client->session_mem.ptr, sizeof(llmd_token_t) * num_tokens);
+		*num_tokens_inout = num_tokens;
+		return LLMD_OK;
+	}
+}
+
+static enum llmd_error
+llmd_ipc_client_get_model_info(
+	struct llmd_driver* header,
+	struct llmd_model_info* info_out
+) {
+	enum llmd_error status;
+	struct llmd_ipc_client* client = (struct llmd_ipc_client*)header;
+
+	struct llmd_rpc_call call;
+	LLMD_CHECK(llmd_ipc_begin_call(client, LLMD_RPC_GET_MODEL_INFO, &call));
+	LLMD_CHECK(llmd_ipc_end_call(client, &call, 0, NULL));
+	LLMD_CHECK(llmd_rpc_read(&call, info_out, sizeof(*info_out)));
+
+	return LLMD_OK;
+}
+
+static enum llmd_error
+llmd_ipc_client_decode_token(
+	struct llmd_driver* header,
+	llmd_token_t token,
+	char* string_out,
+	unsigned int* num_chars_inout
+) {
+	enum llmd_error status;
+	struct llmd_ipc_client* client = (struct llmd_ipc_client*)header;
+
+	struct llmd_rpc_call call;
+	LLMD_CHECK(llmd_ipc_begin_call(client, LLMD_RPC_DECODE_TOKEN, &call));
+	LLMD_CHECK(llmd_rpc_write(&call, &token, sizeof(token)));
+	LLMD_CHECK(llmd_ipc_end_call(client, &call, 0, NULL));
+
+	unsigned int num_chars;
+	LLMD_CHECK(llmd_rpc_read(&call, &num_chars, sizeof(num_chars)));
+
+	if (num_chars > *num_chars_inout) {
+		*num_chars_inout = num_chars;
+		return LLMD_ERR_BUF_SIZE;
+	} else {
+		memcpy(string_out, client->session_mem.ptr, num_chars);
+		*num_chars_inout = num_chars;
+		return LLMD_OK;
+	}
+
+	return LLMD_OK;
+}
+
+static enum llmd_error
+llmd_ipc_client_alloc_context(
+	struct llmd_ipc_client* client,
+	struct llmd_ipc_context** ctx_out
+) {
+	for (unsigned int i = 0; i < client->num_contexts; ++i) {
+		if (client->contexts[i].descriptor == -1) {
+			*ctx_out = &client->contexts[i];
+			return LLMD_OK;
+		}
+	}
+
+	unsigned int num_contexts = client->num_contexts > 1 ? client->num_contexts : 1;
+	struct llmd_ipc_context* new_contexts = llmd_realloc(
+		client->host,
+		client->contexts,
+		num_contexts * 2 * sizeof(struct llmd_ipc_context)
+	);
+	if (new_contexts == NULL) {
+		return LLMD_ERR_OOM;
+	}
+
+	for (unsigned int i = client->num_contexts; i < num_contexts * 2; ++i) {
+		new_contexts[i].descriptor = -1;
+	}
+
+	*ctx_out = &client->contexts[client->num_contexts];
+	client->contexts = new_contexts;
+	client->num_contexts = num_contexts * 2;
+
+	return LLMD_OK;
+}
+
+static enum llmd_error
+llmd_ipc_client_create_context(
+	struct llmd_driver* header,
+	int* descriptor_out
+) {
+	enum llmd_error status;
+	struct llmd_ipc_client* client = (struct llmd_ipc_client*)header;
+
+	struct llmd_ipc_context* context;
+	LLMD_CHECK(llmd_ipc_client_alloc_context(client, &context));
+
+	int context_fds[2];
+	struct llmd_rpc_call call;
+	LLMD_CHECK(llmd_ipc_begin_call(client, LLMD_RPC_CREATE_CONTEXT, &call));
+	LLMD_CHECK(llmd_ipc_end_call(client, &call, 2, context_fds));
+	LLMD_CHECK(llmd_rpc_read(&call, &context->descriptor, sizeof(context->descriptor)));
+
+	status = llmd_ipc_setup_shared_mem(client, &context->context_window, context_fds[0]);
+	enum llmd_error status2 = llmd_ipc_setup_shared_mem(client, &context->logits, context_fds[1]);
+	close(context_fds[0]);
+	close(context_fds[1]);
+
+	if (status != LLMD_OK || status2 != LLMD_OK) {
+		llmd_ipc_cleanup_shared_mem(&context->context_window);
+		llmd_ipc_cleanup_shared_mem(&context->logits);
+		context->descriptor = -1;
+
+		return LLMD_ERR_IO;
+	}
+
+	*descriptor_out = context - client->contexts;
+	return LLMD_OK;
+}
+
+static enum llmd_error
+llmd_ipc_client_destroy_context(
+	struct llmd_driver* header,
+	int descriptor
+) {
+	enum llmd_error status;
+	struct llmd_ipc_client* client = (struct llmd_ipc_client*)header;
+
+	if ((unsigned int)descriptor >= client->num_contexts) {
+		return LLMD_ERR_INVALID;
+	}
+
+	struct llmd_ipc_context* context = &client->contexts[descriptor];
+	if (context->descriptor == -1) {
+		return LLMD_ERR_INVALID;
+	}
+
+	llmd_ipc_cleanup_shared_mem(&context->context_window);
+	llmd_ipc_cleanup_shared_mem(&context->logits);
+
+	struct llmd_rpc_call call;
+	LLMD_CHECK(llmd_ipc_begin_call(client, LLMD_RPC_DESTROY_CONTEXT, &call));
+	LLMD_CHECK(llmd_rpc_write(&call, &context->descriptor, sizeof(context->descriptor)));
+	LLMD_CHECK(llmd_ipc_end_call(client, &call, 0, NULL));
+
+	context->descriptor = -1;
+
+	return LLMD_OK;
+}
+
+static enum llmd_error
+llmd_ipc_client_generate(
+	struct llmd_driver* header,
+	int context_descriptor,
+	const llmd_token_t* tokens,
+	unsigned int num_tokens,
+	unsigned int offset,
+	float* logits_out
+) {
+	enum llmd_error status;
+	struct llmd_ipc_client* client = (struct llmd_ipc_client*)header;
+
+	if ((unsigned int)context_descriptor >= client->num_contexts) {
+		return LLMD_ERR_INVALID;
+	}
+
+	struct llmd_ipc_context* context = &client->contexts[context_descriptor];
+	if (context->descriptor == -1) {
+		return LLMD_ERR_INVALID;
+	}
+
+	if ((offset + num_tokens) > (context->context_window.size / sizeof(llmd_token_t))) {
+		return LLMD_ERR_INVALID;
+	}
+
+	memcpy((llmd_token_t*)context->context_window.ptr + offset, tokens, num_tokens * sizeof(llmd_token_t));
+
+	struct llmd_rpc_call call;
+	LLMD_CHECK(llmd_ipc_begin_call(client, LLMD_RPC_GENERATE, &call));
+	LLMD_CHECK(llmd_rpc_write(&call, &num_tokens, sizeof(num_tokens)));
+	LLMD_CHECK(llmd_rpc_write(&call, &offset, sizeof(offset)));
+	LLMD_CHECK(llmd_ipc_end_call(client, &call, 0, NULL));
+
+	memcpy(logits_out, context->logits.ptr, context->logits.size);
+
+	return LLMD_OK;
+}
+
+static struct llmd_driver_interface llmd_ipc_client_interface = {
+	.get_model_info = llmd_ipc_client_get_model_info,
+	.tokenize = llmd_ipc_client_tokenize,
+	.decode_token = llmd_ipc_client_decode_token,
+	.create_context = llmd_ipc_client_create_context,
+	.destroy_context = llmd_ipc_client_destroy_context,
+	.generate = llmd_ipc_client_generate,
+};
+
+enum llmd_error
+llmd_create_ipc_client(
+	struct llmd_host* host,
+	struct llmd_ipc_client_config* config,
+	struct llmd_driver** driver_out
+) {
+	if (host == NULL) {
+		host = &llmd_default_host;
+	}
+
+	struct llmd_ipc_client* client = llmd_malloc(
+		host,
+		sizeof(struct llmd_ipc_client)
+	);
+	if (client == NULL) {
+		return LLMD_ERR_OOM;
+	}
+
+	*client = (struct llmd_ipc_client) {
+		.header = {
+			.interface = &llmd_ipc_client_interface,
+		},
+		.host = host,
+		.config = config,
+		.ipc_sock = -1,
+	};
+
+	enum llmd_error status = llmd_init_ipc_client(client);
+	if (status != LLMD_OK) {
+		llmd_destroy_ipc_client(&client->header);
+		return status;
+	}
+
+	*driver_out = &client->header;
+	return LLMD_OK;
+}
+
+enum llmd_error
+llmd_destroy_ipc_client(
+	struct llmd_driver* header
+) {
+	struct llmd_ipc_client* client = (struct llmd_ipc_client*)header;
+
+	if (client->ipc_sock != -1) {
+		close(client->ipc_sock);
+	}
+
+	if (client->session_mem.ptr != NULL) {
+		llmd_ipc_cleanup_shared_mem(&client->session_mem);
+	}
+
+	llmd_free(client->host, client);
+	return LLMD_OK;
+}
