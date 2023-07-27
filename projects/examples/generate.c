@@ -1,5 +1,5 @@
-#include "llmd/loader.h"
 #include <stddef.h>
+#include <llmd/loader.h>
 #include <llmd/core.h>
 #include <llmd/sampling.h>
 #include <argparse.h>
@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define MAX_CLI_INI 16
+#define MAX_DRIVER_CONFIGS 16
 
 #define LLMD_CHECK(op) \
 	if ((status = (op)) != LLMD_OK) { \
@@ -15,28 +15,28 @@
 		goto end; \
 	}
 
-struct ini_config {
+struct driver_config_skv {
 	const char* section;
 	const char* key;
 	const char* value;
 };
 
-struct cli_config {
-	unsigned int num_cli_ini;
-	struct ini_config ini_config[MAX_CLI_INI];
+struct config {
+	unsigned int num_driver_configs;
+	struct driver_config_skv driver_configs[MAX_DRIVER_CONFIGS];
 	const char* tmp_string;
 };
 
 static int
-parse_cli_ini(
+parse_driver_config(
 	struct argparse* argparse,
 	const struct argparse_option* option
 ) {
 	(void)argparse;
 
-	struct cli_config* config = (void*)option->data;
-	if (config->num_cli_ini >= MAX_CLI_INI) {
-		fprintf(stderr, "Too many config from argument\n");
+	struct config* config = (void*)option->data;
+	if (config->num_driver_configs >= MAX_DRIVER_CONFIGS) {
+		fprintf(stderr, "Too many driver config entries.\n");
 		return -2;
 	}
 
@@ -51,10 +51,10 @@ parse_cli_ini(
 		return -1;
 	}
 
-	struct ini_config* ini_config = &config->ini_config[config->num_cli_ini++];
-	ini_config->section = strndup(config->tmp_string, dot_pos - config->tmp_string);
-	ini_config->key = strndup(dot_pos + 1, eq_pos - dot_pos - 1);
-	ini_config->value = strndup(eq_pos + 1, strlen(config->tmp_string) - (eq_pos - config->tmp_string));
+	struct driver_config_skv* cli_config = &config->driver_configs[config->num_driver_configs++];
+	cli_config->section = strndup(config->tmp_string, dot_pos - config->tmp_string);
+	cli_config->key = strndup(dot_pos + 1, eq_pos - dot_pos - 1);
+	cli_config->value = strndup(eq_pos + 1, strlen(config->tmp_string) - (eq_pos - config->tmp_string));
 
 	return 0;
 }
@@ -65,8 +65,8 @@ main(int argc, const char* argv[]) {
     const char* config_path = NULL;
     const char* prompt = "Hello";
 
-	struct cli_config cli_config = {
-		.num_cli_ini = 0,
+	struct config config = {
+		.num_driver_configs = 0,
 	};
 
 	struct argparse_option options[] = {
@@ -96,10 +96,10 @@ main(int argc, const char* argv[]) {
 			.type = ARGPARSE_OPT_STRING,
 			.short_name = 's',
 			.long_name = "set",
-			.help = "Set custom config. For example: --set=main.model_path=custom_path",
-			.callback = parse_cli_ini,
-			.value = &cli_config.tmp_string,
-			.data = (intptr_t)(void*)&cli_config,
+			.help = "Set driver config directly. For example: --set=main.model_path=custom_path",
+			.callback = parse_driver_config,
+			.value = &config.tmp_string,
+			.data = (intptr_t)(void*)&config,
 		},
 		OPT_END()
 	};
@@ -109,7 +109,8 @@ main(int argc, const char* argv[]) {
 	argparse_parse(&argparse, argc, argv);
 
 	if (driver_path == NULL) {
-		fprintf(stderr, "Driver path is missing\n");
+		fprintf(stderr, "Driver path is missing\n\n");
+		argparse_usage(&argparse);
 		return 1;
 	}
 
@@ -134,18 +135,18 @@ main(int argc, const char* argv[]) {
 		LLMD_CHECK(llmd_load_driver_config_from_file(loader, config_path));
 	}
 
-	for (unsigned int i = 0; i < cli_config.num_cli_ini; ++i) {
-		const struct ini_config* config = &cli_config.ini_config[i];
+	for (unsigned int i = 0; i < config.num_driver_configs; ++i) {
+		const struct driver_config_skv* driver_config = &config.driver_configs[i];
 		status = llmd_config_driver(
 			loader,
-			config->section, config->key, config->value
+			driver_config->section, driver_config->key, driver_config->value
 		);
 
 		if (status != LLMD_OK) {
 			fprintf(
 				stderr,
 				"Driver rejects config %s.%s=%s\n",
-				config->section, config->key, config->value
+				driver_config->section, driver_config->key, driver_config->value
 			);
 			goto end;
 		}
@@ -241,11 +242,11 @@ end:
 		llmd_destroy_session(session);
 	}
 
-	for (unsigned int i = 0; i < cli_config.num_cli_ini; ++i) {
-		const struct ini_config* config = &cli_config.ini_config[i];
-		free((void*)config->section);
-		free((void*)config->key);
-		free((void*)config->value);
+	for (unsigned int i = 0; i < config.num_driver_configs; ++i) {
+		const struct driver_config_skv* driver_config = &config.driver_configs[i];
+		free((void*)driver_config->section);
+		free((void*)driver_config->key);
+		free((void*)driver_config->value);
 	}
 
 	if (loader != NULL) {
