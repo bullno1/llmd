@@ -6,7 +6,19 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <signal.h>
 #include "common.h"
+
+struct llmd_ipc_server* server = NULL;
+
+static void
+stop_server(int signum) {
+	(void)signum;
+	fprintf(stderr, "Stopping server\n");
+	if (server != NULL) {
+		llmd_stop_ipc_server(server);
+	}
+}
 
 int
 main(int argc, const char* argv[]) {
@@ -68,7 +80,6 @@ main(int argc, const char* argv[]) {
 	enum llmd_error status = LLMD_OK;
 	struct llmd_driver_loader* loader = NULL;
 	struct llmd_driver* driver = NULL;
-	struct llmd_ipc_server* server = NULL;
 
 	LLMD_CHECK(llmd_begin_load_driver(NULL, driver_path, &loader));
 
@@ -96,6 +107,8 @@ main(int argc, const char* argv[]) {
 
 	LLMD_CHECK(llmd_create_ipc_server(NULL, &server_config, driver, &server));
 
+	signal(SIGINT, stop_server);
+	signal(SIGTERM, stop_server);
 	LLMD_CHECK(llmd_start_ipc_server(server));
 end:
 	if (server != NULL) {
