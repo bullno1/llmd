@@ -10,12 +10,18 @@
 
 int
 main(int argc, const char* argv[]) {
-    const char* driver_path = NULL;
-    const char* config_path = NULL;
+	const char* driver_path = NULL;
+	const char* config_path = NULL;
 	char* prompt = malloc(READ_BLOCK);
 	size_t prompt_len = 0;
 	size_t prompt_buf_size = READ_BLOCK;
 	int seed = 0;
+	float temperature = 0.8f;
+	unsigned int n_last = -1;
+	struct llmd_sampling_ring_buf* ring_buf = NULL;
+	float repetition_penalty = 1.10f;
+	float frequency_penalty = 0.00f;
+	float presence_penalty  = 0.00f;
 
 	struct config config = {
 		.num_driver_configs = 0,
@@ -23,6 +29,7 @@ main(int argc, const char* argv[]) {
 
 	struct argparse_option options[] = {
 		OPT_HELP(),
+		OPT_GROUP("Driver options"),
 		{
 			.type = ARGPARSE_OPT_STRING,
 			.short_name = 'd',
@@ -46,11 +53,42 @@ main(int argc, const char* argv[]) {
 			.value = &config.tmp_string,
 			.data = (intptr_t)(void*)&config,
 		},
+		OPT_GROUP("Generation options"),
 		{
 			.type = ARGPARSE_OPT_INTEGER,
 			.long_name = "seed",
 			.help = "The seed for RNG (default: 0, use -1 for a random seed)",
 			.value = &seed,
+		},
+		{
+			.type = ARGPARSE_OPT_FLOAT,
+			.long_name = "temperature",
+			.help = "The temperature",
+			.value = &temperature,
+		},
+		{
+			.type = ARGPARSE_OPT_INTEGER,
+			.long_name = "n-last",
+			.help = "Number of characters to use for penalty. (default: -1 = context length)",
+			.value = &n_last,
+		},
+		{
+			.type = ARGPARSE_OPT_FLOAT,
+			.long_name = "repetition-penalty",
+			.help = "Repetition penalty",
+			.value = &repetition_penalty,
+		},
+		{
+			.type = ARGPARSE_OPT_FLOAT,
+			.long_name = "presence-penalty",
+			.help = "Presence penalty",
+			.value = &presence_penalty,
+		},
+		{
+			.type = ARGPARSE_OPT_FLOAT,
+			.long_name = "frequency-penalty",
+			.help = "Frequency penalty",
+			.value = &frequency_penalty,
 		},
 		OPT_END()
 	};
@@ -147,7 +185,10 @@ main(int argc, const char* argv[]) {
 	prompt_buf[0] = model_info.bos_token;
 	memcpy(prompt_buf + 1, tokens, sizeof(llmd_token_t) * num_tokens);
 
-	struct llmd_sampling_default_rng_state rng_state;
+	ring_buf = llmd_sampling_create_ring_buf(NULL, n_last <= 0 ? model_info.max_context_length : n_last);
+	for (unsigned int i = 0; i < num_tokens + 1; ++i) {
+		llmd_sampling_ring_buf_add_token(ring_buf, prompt_buf[i]);
+	}
 
 	LLMD_CHECK(llmd_begin_generate(context, &gen_handle));
 	LLMD_CHECK(llmd_generate_next(
@@ -158,9 +199,16 @@ main(int argc, const char* argv[]) {
 	));
 	unsigned int offset = num_tokens + 1;
 
+	struct llmd_sampling_default_rng_state rng_state;
 	struct llmd_sampling_rng rng = llmd_sampling_init_default_rng(&rng_state, seed == -1 ? time(NULL) : seed);
 	while (true) {
-		llmd_sampling_apply_temperature(model_info.vocab_size, logits, 0.8f);
+		llmd_sampling_apply_repetition_penalties(
+			model_info.vocab_size, logits, ring_buf, repetition_penalty
+		);
+		llmd_sampling_apply_frequency_and_presence_penalties(
+			model_info.vocab_size, logits, ring_buf, frequency_penalty, presence_penalty
+		);
+		llmd_sampling_apply_temperature(model_info.vocab_size, logits, temperature);
 		llmd_token_t next_token = llmd_sampling_pick_mirostat_v2(
 			model_info.vocab_size, logits, &rng, &mirostat
 		);
@@ -168,6 +216,7 @@ main(int argc, const char* argv[]) {
 		if (next_token == model_info.eos_token) {
 			break;
 		}
+		llmd_sampling_ring_buf_add_token(ring_buf, next_token);
 
 		const char* text;
 		LLMD_CHECK(llmd_decode_token(context, next_token, &text, NULL));
@@ -185,6 +234,10 @@ main(int argc, const char* argv[]) {
 	LLMD_CHECK(llmd_end_generate(gen_handle));
 	gen_handle = NULL;
 end:
+	if (ring_buf != NULL) {
+		llmd_sampling_destroy_ring_buf(ring_buf);
+	}
+
 	if (prompt) {
 		free(prompt);
 	}
