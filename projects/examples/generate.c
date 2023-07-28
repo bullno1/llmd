@@ -5,11 +5,15 @@
 #include <stdlib.h>
 #include "common.h"
 
+#define READ_BLOCK 1024
+
 int
 main(int argc, const char* argv[]) {
     const char* driver_path = NULL;
     const char* config_path = NULL;
-    const char* prompt = "Hello";
+	char* prompt = malloc(READ_BLOCK);
+	size_t prompt_len = 0;
+	size_t prompt_buf_size = READ_BLOCK;
 
 	struct config config = {
 		.num_driver_configs = 0,
@@ -40,18 +44,11 @@ main(int argc, const char* argv[]) {
 			.value = &config.tmp_string,
 			.data = (intptr_t)(void*)&config,
 		},
-		{
-			.type = ARGPARSE_OPT_STRING,
-			.short_name = 'p',
-			.long_name = "prompt",
-			.value = &prompt,
-			.help = "The prompt",
-		},
 		OPT_END()
 	};
 	struct argparse argparse;
 	argparse_init(&argparse, options, NULL, ARGPARSE_STOP_AT_NON_OPTION);
-	argparse_describe(&argparse, "Feed a prompt to a model and run until completion", NULL);
+	argparse_describe(&argparse, "Feed a prompt to a model from stdin and run until completion", NULL);
 	argparse_parse(&argparse, argc, argv);
 
 	if (driver_path == NULL) {
@@ -107,11 +104,28 @@ main(int argc, const char* argv[]) {
 	scratch_buf = malloc(sizeof(float) * model_info.vocab_size);
 	mirostat.scratch_buf = scratch_buf;
 
+	// Read prompt from stdin
+	char buf[READ_BLOCK];
+	size_t num_chars;
+	while ((num_chars = fread(buf, 1, READ_BLOCK, stdin)) != 0) {
+		if ((num_chars + prompt_len) > prompt_buf_size) {
+			prompt_buf_size *= 2;
+			prompt = realloc(prompt, prompt_buf_size);
+			if (prompt == NULL) {
+				fprintf(stderr, "OOM\n");
+				goto end;
+			}
+		}
+
+		memcpy(prompt + prompt_len, buf, num_chars);
+		prompt_len += num_chars;
+	}
+
 	LLMD_CHECK(llmd_create_context(session, LLMD_CONTEXT_MIN_UPLOAD, &context));
 
 	const llmd_token_t* tokens;
 	unsigned int num_tokens;
-	LLMD_CHECK(llmd_tokenize(context, prompt, strlen(prompt), &tokens, &num_tokens));
+	LLMD_CHECK(llmd_tokenize(context, prompt, prompt_len, &tokens, &num_tokens));
 
 	fprintf(stderr, "Tokenized prompt to %d tokens\n", num_tokens);
 	for (unsigned int i = 0; i < num_tokens; ++i) {
@@ -164,6 +178,10 @@ main(int argc, const char* argv[]) {
 	LLMD_CHECK(llmd_end_generate(gen_handle));
 	gen_handle = NULL;
 end:
+	if (prompt) {
+		free(prompt);
+	}
+
 	if (scratch_buf) {
 		free(scratch_buf);
 	}

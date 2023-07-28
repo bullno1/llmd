@@ -9,7 +9,7 @@
 
 #define LLMD_CHECK(op) \
 	if ((status = (op)) != LLMD_OK) { \
-		fprintf(stderr, "%s returns %d", #op, status);\
+		fprintf(stderr, "%s returns %d (%s)", #op, status, llmd_error_to_str(status));\
 		goto end; \
 	}
 

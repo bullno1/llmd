@@ -129,6 +129,19 @@ struct llmd_driver {
 extern "C" {
 #endif
 
+static inline const char*
+llmd_error_to_str(enum llmd_error error) {
+	switch (error) {
+		case LLMD_OK: return "LLMD_OK";
+		case LLMD_ERR_IO: return "LLMD_ERR_IO";
+		case LLMD_ERR_OOM: return "LLMD_ERR_OOM";
+		case LLMD_ERR_BUF_SIZE: return "LLMD_ERR_BUF_SIZE";
+		case LLMD_ERR_INVALID: return "LLMD_ERR_INVALID";
+		case LLMD_ERR_NOT_SUPPORTED: return "LLMD_ERR_NOT_SUPPORTED";
+		default: return NULL;
+	}
+}
+
 LLMD_CORE_API enum llmd_error
 llmd_create_session(
 	struct llmd_host* host,

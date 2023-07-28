@@ -104,7 +104,7 @@ llmd_llama_cpp_tokenize(
 	driver->tmp_str_buf->mem[num_chars] = '\0';
 
 	int num_tokens = llama_tokenize_with_model(
-		driver->model, string, (int*)tokens_out, *num_tokens_inout, false
+		driver->model, driver->tmp_str_buf->mem, (int*)tokens_out, *num_tokens_inout, false
 	);
 
 	if (num_tokens < 0) {
