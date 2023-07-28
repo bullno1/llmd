@@ -3,6 +3,7 @@
 #include <llmd/core.h>
 #include <llmd/sampling.h>
 #include <stdlib.h>
+#include <time.h>
 #include "common.h"
 
 #define READ_BLOCK 1024
@@ -14,6 +15,7 @@ main(int argc, const char* argv[]) {
 	char* prompt = malloc(READ_BLOCK);
 	size_t prompt_len = 0;
 	size_t prompt_buf_size = READ_BLOCK;
+	int seed = 0;
 
 	struct config config = {
 		.num_driver_configs = 0,
@@ -43,6 +45,12 @@ main(int argc, const char* argv[]) {
 			.callback = parse_driver_config,
 			.value = &config.tmp_string,
 			.data = (intptr_t)(void*)&config,
+		},
+		{
+			.type = ARGPARSE_OPT_INTEGER,
+			.long_name = "seed",
+			.help = "The seed for RNG (default: 0, use -1 for a random seed)",
+			.value = &seed,
 		},
 		OPT_END()
 	};
@@ -150,8 +158,7 @@ main(int argc, const char* argv[]) {
 	));
 	unsigned int offset = num_tokens + 1;
 
-	// TODO: better seed
-	struct llmd_sampling_rng rng = llmd_sampling_init_default_rng(&rng_state, 0);
+	struct llmd_sampling_rng rng = llmd_sampling_init_default_rng(&rng_state, seed == -1 ? time(NULL) : seed);
 	while (true) {
 		llmd_sampling_apply_temperature(model_info.vocab_size, logits, 0.8f);
 		llmd_token_t next_token = llmd_sampling_pick_mirostat_v2(
