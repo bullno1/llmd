@@ -643,6 +643,7 @@ llmd_ipc_alloc_session(
 			.ipc_sock = -1,
 			.pollfd = &server->poll_set[i + 1],
 		};
+		new_sessions[i] = new_session;
 	}
 
 	*session_out = new_sessions[server->num_sessions];
@@ -660,7 +661,7 @@ llmd_ipc_accept_client(
 		int client_sock = accept4(server->ipc_sock, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
 		if (client_sock < 0) {
 			if (errno != EINTR && errno != EWOULDBLOCK && errno != EAGAIN) {
-				llmd_log(server->host, LLMD_LOG_WARNING, "accept() returns %s", strerror(errno));
+				llmd_log(server->host, LLMD_LOG_WARNING, "accept() returns: %d (%s)", errno, strerror(errno));
 				return LLMD_ERR_IO;
 			} else {
 				return LLMD_OK;

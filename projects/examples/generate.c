@@ -2,62 +2,8 @@
 #include <llmd/loader.h>
 #include <llmd/core.h>
 #include <llmd/sampling.h>
-#include <argparse.h>
-#include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-
-#define MAX_DRIVER_CONFIGS 16
-
-#define LLMD_CHECK(op) \
-	if ((status = (op)) != LLMD_OK) { \
-		fprintf(stderr, "%s returns %d", #op, status);\
-		goto end; \
-	}
-
-struct driver_config_skv {
-	const char* section;
-	const char* key;
-	const char* value;
-};
-
-struct config {
-	unsigned int num_driver_configs;
-	struct driver_config_skv driver_configs[MAX_DRIVER_CONFIGS];
-	const char* tmp_string;
-};
-
-static int
-parse_driver_config(
-	struct argparse* argparse,
-	const struct argparse_option* option
-) {
-	(void)argparse;
-
-	struct config* config = (void*)option->data;
-	if (config->num_driver_configs >= MAX_DRIVER_CONFIGS) {
-		fprintf(stderr, "Too many driver config entries.\n");
-		return -2;
-	}
-
-	char* dot_pos = strchr(config->tmp_string, '.');
-	char* eq_pos = strchr(config->tmp_string, '=');
-	if (
-		dot_pos == NULL
-		|| eq_pos == NULL
-		|| eq_pos < dot_pos
-	) {
-		fprintf(stderr, "Invalid config string %s\n", config->tmp_string);
-		return -1;
-	}
-
-	struct driver_config_skv* cli_config = &config->driver_configs[config->num_driver_configs++];
-	cli_config->section = strndup(config->tmp_string, dot_pos - config->tmp_string);
-	cli_config->key = strndup(dot_pos + 1, eq_pos - dot_pos - 1);
-	cli_config->value = strndup(eq_pos + 1, strlen(config->tmp_string) - (eq_pos - config->tmp_string));
-
-	return 0;
-}
+#include "common.h"
 
 int
 main(int argc, const char* argv[]) {
@@ -87,13 +33,6 @@ main(int argc, const char* argv[]) {
 		},
 		{
 			.type = ARGPARSE_OPT_STRING,
-			.short_name = 'p',
-			.long_name = "prompt",
-			.value = &prompt,
-			.help = "The prompt",
-		},
-		{
-			.type = ARGPARSE_OPT_STRING,
 			.short_name = 's',
 			.long_name = "set",
 			.help = "Set driver config directly. For example: --set=main.model_path=custom_path",
@@ -101,15 +40,22 @@ main(int argc, const char* argv[]) {
 			.value = &config.tmp_string,
 			.data = (intptr_t)(void*)&config,
 		},
+		{
+			.type = ARGPARSE_OPT_STRING,
+			.short_name = 'p',
+			.long_name = "prompt",
+			.value = &prompt,
+			.help = "The prompt",
+		},
 		OPT_END()
 	};
 	struct argparse argparse;
 	argparse_init(&argparse, options, NULL, ARGPARSE_STOP_AT_NON_OPTION);
-	argparse_describe(&argparse, "Feed a prompt to a model and run until copmletion", NULL);
+	argparse_describe(&argparse, "Feed a prompt to a model and run until completion", NULL);
 	argparse_parse(&argparse, argc, argv);
 
 	if (driver_path == NULL) {
-		fprintf(stderr, "Driver path is missing\n\n");
+		fprintf(stderr, "Driver path is missing.\n\n");
 		argparse_usage(&argparse);
 		return 1;
 	}

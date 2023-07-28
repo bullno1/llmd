@@ -16,7 +16,7 @@
 
 #define LLMD_SYSCALL_CHECK(host, op) \
 	if ((op) < 0) { \
-		llmd_log(host, LLMD_LOG_ERROR, #op " returns %s", strerror(errno)); \
+		llmd_log(host, LLMD_LOG_ERROR, #op " returns: %d (%s)", errno, strerror(errno)); \
 		return LLMD_ERR_IO; \
 	}
 #endif
