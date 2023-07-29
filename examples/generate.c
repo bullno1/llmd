@@ -185,7 +185,7 @@ main(int argc, const char* argv[]) {
 	prompt_buf[0] = model_info.bos_token;
 	memcpy(prompt_buf + 1, tokens, sizeof(llmd_token_t) * num_tokens);
 
-	ring_buf = llmd_sampling_create_ring_buf(NULL, n_last <= 0 ? model_info.max_context_length : n_last);
+	ring_buf = llmd_sampling_create_ring_buf(NULL, (int)n_last > 0 ? n_last : model_info.max_context_length);
 	for (unsigned int i = 0; i < num_tokens + 1; ++i) {
 		llmd_sampling_ring_buf_add_token(ring_buf, prompt_buf[i]);
 	}

@@ -127,12 +127,11 @@ llmd_ipc_handle_session_close(
 		struct llmd_ipc_client_context* context = &server->contexts[i];
 		if (context->owner != session) { continue; }
 
-		server->driver->interface->destroy_context(server->driver, context->descriptor);
+		llmd_log(server->host, LLMD_LOG_DEBUG, "Recycling context: %d", i);
 
 		llmd_ipc_cleanup_shared_mem(&context->context_window);
 		llmd_ipc_cleanup_shared_mem(&context->logits);
 		context->owner = NULL;
-		context->descriptor = -1;
 	}
 
 	llmd_ipc_cleanup_shared_mem(&session->shared_mem);
@@ -298,13 +297,27 @@ llmd_ipc_alloc_context(
 	struct llmd_ipc_server* server,
 	struct llmd_ipc_client_context** ctx_out
 ) {
+	// First, look for an already created but unowned context
 	for (unsigned int i = 0; i < server->num_contexts; ++i) {
-		if (server->contexts[i].descriptor == -1) {
-			*ctx_out = &server->contexts[i];
+		struct llmd_ipc_client_context* context = &server->contexts[i];
+		if (context->owner == NULL && context->descriptor != -1) {
+			llmd_log(server->host, LLMD_LOG_DEBUG, "Found reusable context: %d", i);
+			*ctx_out = context;
 			return LLMD_OK;
 		}
 	}
 
+	// Then, look for an empty context slot
+	for (unsigned int i = 0; i < server->num_contexts; ++i) {
+		struct llmd_ipc_client_context* context = &server->contexts[i];
+		if (context->owner == NULL) {
+			llmd_log(server->host, LLMD_LOG_DEBUG, "Found empty context slot: %d", i);
+			*ctx_out = context;
+			return LLMD_OK;
+		}
+	}
+
+	// Then, try to allocate new slots
 	unsigned int num_contexts = server->num_contexts > 1 ? server->num_contexts : 1;
 	struct llmd_ipc_client_context* new_contexts = llmd_realloc(
 		server->host,
@@ -318,9 +331,11 @@ llmd_ipc_alloc_context(
 	for (unsigned int i = server->num_contexts; i < num_contexts * 2; ++i) {
 		new_contexts[i] = (struct llmd_ipc_client_context) {
 			.descriptor = -1,
+			.owner = NULL,
 		};
 	}
 
+	llmd_log(server->host, LLMD_LOG_DEBUG, "Create new context slot: %d", server->num_contexts);
 	*ctx_out = &new_contexts[server->num_contexts];
 	server->contexts = new_contexts;
 	server->num_contexts = num_contexts * 2;
@@ -339,16 +354,19 @@ llmd_ipc_handle_create_context(
 	LLMD_CHECK(llmd_ipc_alloc_context(server, &context));
 	int client_ctx_descriptor = context - server->contexts;
 
-	struct llmd_driver* driver = server->driver;
-	status = driver->interface->create_context(
-		driver,
-		&context->descriptor
-	);
+	// It is possible that this is a recycled context
+	if (context->descriptor == -1) {
+		struct llmd_driver* driver = server->driver;
+		status = driver->interface->create_context(
+			driver,
+			&context->descriptor
+		);
 
-	if (status != LLMD_OK) {
-		LLMD_CHECK(llmd_ipc_begin_response(session, status));
-		LLMD_CHECK(llmd_ipc_end_response(session));
-		return LLMD_OK;
+		if (status != LLMD_OK) {
+			LLMD_CHECK(llmd_ipc_begin_response(session, status));
+			LLMD_CHECK(llmd_ipc_end_response(session));
+			return LLMD_OK;
+		}
 	}
 
 	context->owner = session;
@@ -389,7 +407,7 @@ llmd_ipc_handle_destroy_context(
 	struct llmd_ipc_server* server,
 	struct llmd_ipc_session* session
 ) {
-	enum llmd_error status;
+	enum llmd_error status = LLMD_OK;
 
 	int descriptor;
 	LLMD_CHECK(llmd_rpc_read(&session->buf, &descriptor, sizeof(descriptor)));
@@ -403,12 +421,7 @@ llmd_ipc_handle_destroy_context(
 		return llmd_ipc_handle_invalid_rpc(server, session);
 	}
 
-	struct llmd_driver* driver = server->driver;
-	status = driver->interface->destroy_context(
-		driver,
-		context->descriptor
-	);
-	context->descriptor = -1;
+	// Pool the context for reuse and don't destroy the actual context
 	llmd_ipc_cleanup_shared_mem(&context->context_window);
 	llmd_ipc_cleanup_shared_mem(&context->logits);
 	context->owner = NULL;
@@ -784,13 +797,16 @@ llmd_destroy_ipc_server(
 ) {
 	for (unsigned int i = 0; i < server->num_sessions; ++i) {
 		struct llmd_ipc_session* session = server->sessions[i];
-		if (session->ipc_sock == -1) { continue; }
-		close(session->ipc_sock);
+		if (session->ipc_sock != -1) {
+			close(session->ipc_sock);
+		}
 
 		llmd_ipc_cleanup_shared_mem(&session->shared_mem);
 
 		for (unsigned int j = 0; j < session->num_fds; ++j) {
-			close(session->fds[j]);
+			if (session->fds[j] != -1) {
+				close(session->fds[j]);
+			}
 		}
 
 		llmd_free(server->host, session);
@@ -800,12 +816,12 @@ llmd_destroy_ipc_server(
 
 	for (unsigned int i = 0; i < server->num_contexts; ++i) {
 		struct llmd_ipc_client_context* context = &server->contexts[i];
-		if (context->descriptor == -1) { continue; }
-
-		server->driver->interface->destroy_context(
-			server->driver,
-			context->descriptor
-		);
+		if (context->descriptor != -1) {
+			server->driver->interface->destroy_context(
+				server->driver,
+				context->descriptor
+			);
+		}
 
 		llmd_ipc_cleanup_shared_mem(&context->context_window);
 		llmd_ipc_cleanup_shared_mem(&context->logits);
