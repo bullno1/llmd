@@ -172,6 +172,11 @@ llmd_destroy_context(
 	struct llmd_context* context
 );
 
+LLMD_CORE_API struct llmd_session*
+llmd_get_session_of_context(
+	struct llmd_context* context
+);
+
 LLMD_CORE_API enum llmd_error
 llmd_tokenize(
 	struct llmd_context* ctx,

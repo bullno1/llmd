@@ -412,6 +412,13 @@ llmd_destroy_context(
 	return LLMD_OK;
 }
 
+struct llmd_session*
+llmd_get_session_of_context(
+	struct llmd_context* context
+) {
+	return context->session;
+}
+
 enum llmd_error
 llmd_tokenize(
 	struct llmd_context* ctx,

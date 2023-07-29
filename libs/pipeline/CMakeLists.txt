@@ -1,0 +1,6 @@
+add_library(lm_pipeline
+	"src/pipeline.c"
+)
+
+target_include_directories(lm_pipeline PUBLIC "./include")
+target_link_libraries(lm_pipeline PRIVATE llmd_core llmd_utils)
