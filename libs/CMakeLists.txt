@@ -1,0 +1,6 @@
+add_subdirectory(utils)
+add_subdirectory(core)
+add_subdirectory(llama_cpp)
+add_subdirectory(ipc)
+add_subdirectory(sampling)
+add_subdirectory(loader)
