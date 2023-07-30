@@ -1,5 +1,4 @@
 #include <stddef.h>
-#include <llmd/loader.h>
 #include <llmd/core.h>
 #include <llmd/ipc/server.h>
 #include <argparse.h>
@@ -22,30 +21,26 @@ stop_server(int signum) {
 
 int
 main(int argc, const char* argv[]) {
-    const char* driver_path = NULL;
-    const char* config_path = NULL;
-
-	struct config config = {
-		.num_driver_configs = 0,
-	};
+	struct driver_config driver_config = { 0 };
 	struct llmd_ipc_server_config server_config = {
 		.name = "llmd-ipc",
 	};
 
 	struct argparse_option options[] = {
 		OPT_HELP(),
+		OPT_GROUP("Driver options"),
 		{
 			.type = ARGPARSE_OPT_STRING,
 			.short_name = 'd',
 			.long_name = "driver",
-			.value = &driver_path,
+			.value = &driver_config.driver_path,
 			.help = "Path to driver",
 		},
 		{
 			.type = ARGPARSE_OPT_STRING,
 			.short_name = 'c',
 			.long_name = "config",
-			.value = &config_path,
+			.value = &driver_config.config_file_path,
 			.help = "Path to config file",
 		},
 		{
@@ -54,9 +49,10 @@ main(int argc, const char* argv[]) {
 			.long_name = "set",
 			.help = "Set driver config directly. For example: --set=main.model_path=custom_path",
 			.callback = parse_driver_config,
-			.value = &config.tmp_string,
-			.data = (intptr_t)(void*)&config,
+			.value = &driver_config.tmp_string,
+			.data = (intptr_t)(void*)&driver_config,
 		},
+		OPT_GROUP("Server options"),
 		{
 			.type = ARGPARSE_OPT_STRING,
 			.short_name = 'n',
@@ -71,40 +67,11 @@ main(int argc, const char* argv[]) {
 	argparse_describe(&argparse, "Run an IPC server", NULL);
 	argparse_parse(&argparse, argc, argv);
 
-	if (driver_path == NULL) {
-		fprintf(stderr, "Driver path is missing.\n\n");
-		argparse_usage(&argparse);
-		return 1;
-	}
-
 	enum llmd_error status = LLMD_OK;
 	struct llmd_driver_loader* loader = NULL;
 	struct llmd_driver* driver = NULL;
 
-	LLMD_CHECK(llmd_begin_load_driver(NULL, driver_path, &loader));
-
-	if (config_path != NULL) {
-		LLMD_CHECK(llmd_load_driver_config_from_file(loader, config_path));
-	}
-
-	for (unsigned int i = 0; i < config.num_driver_configs; ++i) {
-		const struct driver_config_skv* driver_config = &config.driver_configs[i];
-		status = llmd_config_driver(
-			loader,
-			driver_config->section, driver_config->key, driver_config->value
-		);
-
-		if (status != LLMD_OK) {
-			fprintf(
-				stderr,
-				"Driver rejects config %s.%s=%s\n",
-				driver_config->section, driver_config->key, driver_config->value
-			);
-			goto end;
-		}
-	}
-	LLMD_CHECK(llmd_end_load_driver(loader, &driver));
-
+	LLMD_CHECK(load_driver(&driver_config, &argparse, &loader, &driver));
 	LLMD_CHECK(llmd_create_ipc_server(NULL, &server_config, driver, &server));
 
 	signal(SIGINT, stop_server);
@@ -119,12 +86,7 @@ end:
 		llmd_unload_driver(loader);
 	}
 
-	for (unsigned int i = 0; i < config.num_driver_configs; ++i) {
-		const struct driver_config_skv* driver_config = &config.driver_configs[i];
-		free((void*)driver_config->section);
-		free((void*)driver_config->key);
-		free((void*)driver_config->value);
-	}
+	cleanup_driver_config(&driver_config);
 
 	return status == LLMD_OK ? 0 : 1;
 }
