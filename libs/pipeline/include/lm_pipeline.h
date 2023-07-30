@@ -5,9 +5,17 @@
 #include <llmd/core.h>
 #include <stdbool.h>
 
-struct lm_pipeline_var {
+struct lm_pipeline_span {
 	unsigned int begin;
 	unsigned int end;
+};
+
+struct lm_pipeline_var {
+	const char* name;
+	// FIXME: Expose token offset only. Use a mapping from token offset to text offset
+	// Rolling back will also be faster
+	struct lm_pipeline_span token_span;
+	struct lm_pipeline_span text_span;
 };
 
 enum lm_pipeline_event_type {
@@ -65,7 +73,12 @@ lm_pipeline_run(
 );
 
 LLMD_CORE_API void
-lm_pipeline_abort(struct lm_pipeline_ctx* ctx, enum llmd_error error);
+lm_pipeline_abort(
+	struct lm_pipeline_ctx* ctx,
+	enum llmd_error error,
+	const char* file,
+	unsigned int line
+);
 
 LM_PIPELINE_API struct llmd_model_info
 lm_pipeline_get_model_info(struct lm_pipeline_ctx* ctx);

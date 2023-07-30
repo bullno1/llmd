@@ -3,6 +3,7 @@
 #include <lm_pipeline/sampling.h>
 #include <llmd/utils/arena_allocator.h>
 #include <llmd/utils/buffer.h>
+#include <llmd/utils/host.h>
 #include <setjmp.h>
 #include <assert.h>
 #include <string.h>
@@ -17,12 +18,12 @@
 
 #define lm_pipeline_assert(cond, error) \
 	do { \
-		if (!(cond)) { lm_pipeline_abort(ctx, error); } \
+		if (!(cond)) { lm_pipeline_abort(ctx, error, __FILE__, __LINE__); } \
 	} while(0)
 
 #define lm_pipeline_check(op) \
 	if ((ctx->status = (op)) != LLMD_OK) { \
-		lm_pipeline_abort(ctx, ctx->status); \
+		lm_pipeline_abort(ctx, ctx->status, __FILE__, __LINE__); \
 	}
 
 struct lm_pipeline_watcher_entry {
@@ -94,6 +95,7 @@ lm_pipeline_emit_event(
 
 struct lm_pipeline_ctx*
 lm_pipeline_create_ctx(struct llmd_host* host) {
+	host = host != NULL ? host : &llmd_default_host;
 	struct lm_pipeline_ctx* ctx = llmd_malloc(host, sizeof(struct lm_pipeline_ctx));
 	if (ctx == NULL) { return NULL; }
 
@@ -205,14 +207,25 @@ lm_pipeline_run(
 void*
 lm_pipeline_malloc(struct lm_pipeline_ctx* ctx, size_t size) {
 	void* result = llmd_arena_allocator_malloc(&ctx->allocator, size);
-	if (result == NULL) { lm_pipeline_abort(ctx, LLMD_ERR_OOM); }
+	if (result == NULL) { lm_pipeline_abort(ctx, LLMD_ERR_OOM, __FILE__, __LINE__); }
 
 	return result;
 }
 
 void
-lm_pipeline_abort(struct lm_pipeline_ctx* ctx, enum llmd_error error) {
+lm_pipeline_abort(
+	struct lm_pipeline_ctx* ctx,
+	enum llmd_error error,
+	const char* file,
+	unsigned int line
+) {
 	assert(ctx->lm != NULL);
+	llmd_log(
+		ctx->host, LLMD_LOG_ERROR,
+		"Pipeline aborted. Reason: error %d (%s) at %s:%d",
+		error, llmd_error_to_str(error),
+		file, line
+	);
 	ctx->status = error;
 	longjmp(ctx->jmp, 1);
 }
@@ -331,6 +344,7 @@ lm_pipeline_rewind(struct lm_pipeline_ctx* ctx, unsigned int pos) {
 
 void
 lm_pipeline_push_string(struct lm_pipeline_ctx* ctx, const char* string) {
+	// TODO: buffer a batch of strings before tokenizing
 	const llmd_token_t* tokens;
 	unsigned int num_tokens;
 	lm_pipeline_check(
@@ -386,7 +400,8 @@ lm_pipeline_push_tokens(
 
 void
 lm_pipeline_begin_capture(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* var) {
-	var->begin = ctx->token_offset;
+	var->token_span.begin = ctx->token_offset;
+	var->text_span.begin = ctx->text_offset;
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 		.type = LM_PIPELINE_CAPTURE_BEGIN,
@@ -396,7 +411,8 @@ lm_pipeline_begin_capture(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* v
 
 void
 lm_pipeline_end_capture(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* var) {
-	var->end = ctx->token_offset;
+	var->token_span.end = ctx->token_offset;
+	var->text_span.end = ctx->text_offset;
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 		.type = LM_PIPELINE_CAPTURE_END,
@@ -408,9 +424,9 @@ const char*
 lm_pipeline_var_get(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* var) {
 	assert(var->end >= var->begin);
 
-	size_t len = var->end - var->begin;
+	size_t len = var->text_span.end - var->text_span.begin;
 	char* buf = lm_pipeline_malloc(ctx, len + 1);
-	memcpy(buf, ctx->text_buf->mem + var->begin, len);
+	memcpy(buf, ctx->text_buf->mem + var->text_span.begin, len);
 	buf[len] = '\0';
 
 	return buf;
@@ -673,7 +689,7 @@ lm_pipeline_check_suffix_str(
 		}
 	}
 
-	lm_pipeline_abort(ctx, LLMD_ERR_IO);
+	lm_pipeline_abort(ctx, LLMD_ERR_IO, __FILE__, __LINE__);
 	return 0;
 }
 
@@ -688,5 +704,5 @@ lm_pipeline_check_suffix_tokens(
 		tokens,
 		(llmd_token_t*)ctx->token_buf->mem + ctx->token_offset - num_tokens,
 		num_tokens * sizeof(llmd_token_t)
-	) ? num_tokens : 0;
+	) == 0 ? num_tokens : 0;
 }

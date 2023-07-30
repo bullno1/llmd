@@ -17,3 +17,10 @@ target_link_libraries(
 	llmd_core llmd_loader llmd_ipc_server
 )
 set_target_properties(llmd_ipc PROPERTIES OUTPUT_NAME "llmd-ipc")
+
+add_executable(lm_pipeline_example "pipeline.c")
+target_link_libraries(
+	lm_pipeline_example PRIVATE
+	argparse lm_pipeline llmd_loader
+)
+set_target_properties(lm_pipeline_example PROPERTIES OUTPUT_NAME "pipeline")

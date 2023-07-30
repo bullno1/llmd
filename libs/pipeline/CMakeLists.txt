@@ -4,4 +4,5 @@ add_library(lm_pipeline
 )
 
 target_include_directories(lm_pipeline PUBLIC "./include")
-target_link_libraries(lm_pipeline PRIVATE llmd_core llmd_utils)
+target_link_libraries(lm_pipeline PUBLIC llmd_core)
+target_link_libraries(lm_pipeline PRIVATE llmd_utils)

@@ -13,7 +13,7 @@ lm_pipeline_argmax_sampler(float* scores, unsigned int num_entries, void* userda
 	for (unsigned int i = 0; i < num_entries; ++i) {
 		if (scores[i] > best_score) {
 			best_score = scores[i];
-			best_token = LLMD_INVALID_TOKEN;
+			best_token = i;
 		}
 	}
 

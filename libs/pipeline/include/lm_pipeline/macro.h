@@ -3,11 +3,9 @@
 
 #include "../lm_pipeline.h"
 
-#define lm_pipeline_bind(ctx, llm) \
+#define lm_pipeline_bind(ctx) \
 	struct lm_pipeline_ctx* lm_pipeline__ctx = ctx; \
-	var_(lm_pipeline__suffix); \
-	(void)lm_pipeline__ctx; \
-	(void)lm_pipeline__suffix;
+	(void)lm_pipeline__ctx;
 
 #define lm_pipeline_va_pack(type, ...) (type[]){ __VA_ARGS__ }
 
@@ -23,11 +21,11 @@
 		lm_pipeline_va_count(llmd_token_t, __VA_ARGS__) \
 	)
 
-#define var_(name) struct lm_pipeline_var name = { 0 }
+#define var_(var_name__) struct lm_pipeline_var var_name__ = { .name = #var_name__ }
 
-#define get_(name) lm_pipeline_var_get(var)
+#define get_(var_name) lm_pipeline_var_get(lm_pipeline__ctx, &var_name)
 
-#define to_str_(name) str_(get(var))
+#define to_str_(var_name) str_(get_(var_name))
 
 #define pick_one_str_(...) \
 	lm_pipeline_generate_one_of_strings( \
@@ -45,33 +43,30 @@
 
 #define capture_(var, ...) \
 	do { \
-		lm_pipeline_start_capture(lm_pipeline__ctx, var); \
-		unsigned int lm_pipeline__suffix_len; \
+		lm_pipeline_begin_capture(lm_pipeline__ctx, &var); \
+		unsigned int lm_pipeline__suffix_len = 0; \
 		do { \
 			llmd_token_t next_token = lm_pipeline_sample_next_token(lm_pipeline__ctx); \
 			lm_pipeline_push_tokens(lm_pipeline__ctx, &next_token, 1); \
 			lm_pipeline__suffix_len = lm_pipeline_first_suffix_match( \
 				lm_pipeline_va_pack(unsigned int, __VA_ARGS__), \
-				lm_pipeline_va_count(unsigned int, __VA_ARGS__), \
+				lm_pipeline_va_count(unsigned int, __VA_ARGS__) \
 			); \
 		} while (lm_pipeline__suffix_len == 0); \
-		lm_pipeline__suffix.end = lm_pipeline_get_num_tokens(lm_pipeline__ctx); \
 		lm_pipeline_rewind( \
 			lm_pipeline__ctx, \
 			lm_pipeline_get_num_tokens(lm_pipeline__ctx) - lm_pipeline__suffix_len \
 		); \
-		lm_pipeline__suffix.begin = lm_pipeline_get_num_tokens(lm_pipeline__ctx); \
-		lm_pipeline_end_capture(lm_pipeline__ctx, var); \
+		lm_pipeline_end_capture(lm_pipeline__ctx, &var); \
 	} while(0)
 
-#define suffix_ lm_pipeline__suffix
 #define ends_with_(str) lm_pipeline_check_suffix_str(lm_pipeline__ctx, str, false)
 #define ends_with_exact_(str) lm_pipeline_check_suffix_str(lm_pipeline__ctx, str, true)
 #define ends_with_tokens_(...) \
 	lm_pipeline_check_suffix_tokens( \
 		lm_pipeline__ctx, \
-		lm_pipeline_va_pack(__VA_ARGS__), \
-		lm_pipeline_va_count(__VA_ARGS__) \
+		lm_pipeline_va_pack(llmd_token_t, __VA_ARGS__), \
+		lm_pipeline_va_count(llmd_token_t, __VA_ARGS__) \
 	)
 #define checkpoint_(name) unsigned int name = lm_pipeline_get_num_tokens(lm_pipeline__ctx)
 #define rewind_(pos) lm_pipeline_rewind(lm_pipeline__ctx, pos)
