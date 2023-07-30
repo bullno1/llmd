@@ -30,7 +30,8 @@ struct lm_pipeline_event {
 		} new_tokens;
 
 		struct {
-			unsigned int new_pos;
+			unsigned int new_token_pos;
+			unsigned int new_text_pos;
 		} rewind;
 
 		struct {
@@ -39,8 +40,8 @@ struct lm_pipeline_event {
 	} data;
 };
 
-typedef void (*lm_pipeline_logit_processor_t)(float* scores, void* userdata);
-typedef llmd_token_t (*lm_pipeline_sampler_t)(float* scores, void* userdata);
+typedef void (*lm_pipeline_logit_processor_t)(float* scores, unsigned int num_entries, void* userdata);
+typedef llmd_token_t (*lm_pipeline_sampler_t)(float* scores, unsigned int num_entries, void* userdata);
 typedef void (*lm_pipeline_watcher_t)(struct lm_pipeline_event event, void* userdata);
 typedef void (*lm_pipeline_finalizer_t)(void* userdata);
 typedef void (*lm_pipeline_t)(struct lm_pipeline_ctx* ctx, void* userdata);

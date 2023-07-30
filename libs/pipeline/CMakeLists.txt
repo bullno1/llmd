@@ -1,5 +1,6 @@
 add_library(lm_pipeline
 	"src/pipeline.c"
+	"src/sampling.c"
 )
 
 target_include_directories(lm_pipeline PUBLIC "./include")

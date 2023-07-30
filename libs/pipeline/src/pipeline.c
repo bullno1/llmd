@@ -9,6 +9,8 @@
 #include <math.h>
 #include <ctype.h>
 
+#define LM_ARENA_CHUNK_SIZE 2048
+
 #define lm_pipeline_new(var, type) \
 	type* var = lm_pipeline_malloc(ctx, sizeof(type)); \
 	*var = (type)
@@ -98,7 +100,7 @@ lm_pipeline_create_ctx(struct llmd_host* host) {
 	*ctx = (struct lm_pipeline_ctx) {
 		.host = host,
 	};
-	llmd_arena_allocator_init(host, &ctx->allocator, 2048);
+	llmd_arena_allocator_init(host, &ctx->allocator, LM_ARENA_CHUNK_SIZE);
 
 	return ctx;
 }
@@ -146,6 +148,7 @@ lm_pipeline_run(
 		max_token_length = token_length > max_token_length ? token_length : max_token_length;
 	}
 
+	// Add 1 for NULL terminator
 	size_t required_text_buf_size = ctx->model_info.vocab_size * max_token_length + 1;
 	if (llmd_buffer_size(ctx->text_buf) < required_text_buf_size) {
 		ctx->text_buf = llmd_realloc_buffer(
@@ -175,7 +178,7 @@ lm_pipeline_run(
 	ctx->finalizers = NULL;
 	ctx->eval_offset = ctx->token_offset = 0;
 	ctx->uppercase_text_offset = ctx->text_offset = 0;
-	lm_pipeline_use_greedy_sampler(ctx);
+	lm_pipeline_use_argmax_sampler(ctx);
 	llmd_arena_allocator_reset(&ctx->allocator);
 	if ((status = llmd_begin_generate(lm, &ctx->gen_handle)) != LLMD_OK) {
 		return status;
@@ -281,6 +284,7 @@ lm_pipeline_set_sampler(
 	lm_pipeline_sampler_t sampler, void* userdata
 ) {
 	assert(ctx->lm != NULL);
+
 	ctx->sampler_userdata = userdata;
 	ctx->sampler = sampler;
 }
@@ -302,13 +306,12 @@ lm_pipeline_rewind(struct lm_pipeline_ctx* ctx, unsigned int pos) {
 	ctx->token_offset = pos;
 	ctx->eval_offset = ctx->eval_offset < pos ? ctx->eval_offset : pos;
 
-	// Rewind the text buffer
+	// Rewind the text buffer to match
+	llmd_token_t* token_buf = (llmd_token_t*)ctx->token_buf->mem;
 	for (unsigned int i = pos; i < old_offset; ++i) {
 		unsigned int token_len;
-		llmd_token_t token = ((llmd_token_t*)ctx->token_buf->mem)[i];
-		lm_pipeline_check(
-			llmd_decode_token(ctx->lm, token, NULL, &token_len)
-		);
+		llmd_token_t token = token_buf[i];
+		lm_pipeline_check(llmd_decode_token(ctx->lm, token, NULL, &token_len));
 		ctx->text_offset -= token_len;
 	}
 	ctx->uppercase_text_offset = ctx->uppercase_text_offset < ctx->text_offset
@@ -317,7 +320,12 @@ lm_pipeline_rewind(struct lm_pipeline_ctx* ctx, unsigned int pos) {
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 		.type = LM_PIPELINE_REWIND,
-		.data = { .rewind = { .new_pos = pos } }
+		.data = {
+			.rewind = {
+				.new_token_pos = pos,
+				.new_text_pos = ctx->text_offset,
+			}
+		}
 	});
 }
 
@@ -338,8 +346,9 @@ lm_pipeline_push_tokens(
 	const llmd_token_t* tokens,
 	unsigned int num_tokens
 ) {
+	// TODO: Add overflow handler
 	lm_pipeline_assert(
-		num_tokens + lm_pipeline_get_num_tokens(ctx) <= ctx->model_info.max_context_length,
+		ctx->token_offset + num_tokens <= ctx->model_info.max_context_length,
 		LLMD_ERR_BUF_SIZE
 	);
 
@@ -377,7 +386,7 @@ lm_pipeline_push_tokens(
 
 void
 lm_pipeline_begin_capture(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* var) {
-	var->begin = lm_pipeline_get_num_tokens(ctx);
+	var->begin = ctx->token_offset;
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 		.type = LM_PIPELINE_CAPTURE_BEGIN,
@@ -387,7 +396,7 @@ lm_pipeline_begin_capture(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* v
 
 void
 lm_pipeline_end_capture(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* var) {
-	var->end = lm_pipeline_get_num_tokens(ctx);
+	var->end = ctx->token_offset;
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 		.type = LM_PIPELINE_CAPTURE_END,
@@ -425,18 +434,18 @@ lm_pipeline_get_next_logits(struct lm_pipeline_ctx* ctx) {
 				logit_buf
 			)
 		);
-		ctx->eval_offset = ctx->token_offset;
 
 		lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 			.type = LM_PIPELINE_LLM_EVAL_END,
 		});
+		ctx->eval_offset = ctx->token_offset;
 
 		for (
 			struct lm_pipeline_logit_processor_entry* entry = ctx->first_logit_processor;
 			entry != NULL;
 			entry = entry->next
 		) {
-			entry->fn(logit_buf, entry->userdata);
+			entry->fn(logit_buf, ctx->model_info.vocab_size, entry->userdata);
 		}
 	}
 
@@ -460,11 +469,13 @@ lm_pipeline_filter_next_tokens(
 struct lm_prefix_set {
 	struct lm_pipeline_ctx* ctx;
 	char** prefixes;
+	size_t* str_lens;
 	unsigned int num_prefixes;
 };
 
 static bool
-lm_pipeline_match_prefixes(llmd_token_t id, struct lm_prefix_set* prefix_set) {
+lm_pipeline_match_prefixes(llmd_token_t id, void* userdata) {
+	struct lm_prefix_set* prefix_set = userdata;
 	struct lm_pipeline_ctx* ctx = prefix_set->ctx;
 	const char* token_text;
 	unsigned int text_len;
@@ -473,13 +484,10 @@ lm_pipeline_match_prefixes(llmd_token_t id, struct lm_prefix_set* prefix_set) {
 	);
 
 	for (unsigned int i = 0; i < prefix_set->num_prefixes; ++i) {
-		char* prefix = prefix_set->prefixes[i];
-		if (prefix == NULL) { continue; }
-
-		size_t prefix_len = strlen(prefix);  // TODO: calculate once
-
+		size_t prefix_len = prefix_set->str_lens[i];
 		if (text_len > prefix_len) { continue; }
 
+		char* prefix = prefix_set->prefixes[i];
 		if (memcmp(token_text, prefix, text_len) == 0) {
 			return true;
 		}
@@ -496,6 +504,7 @@ lm_pipeline_generate_one_of_strings(
 ) {
 	// Make a mutable copy of strings
 	char** prefixes = lm_pipeline_malloc(ctx, num_strings * sizeof(void*));
+	size_t* str_lens = lm_pipeline_malloc(ctx, num_strings * sizeof(size_t));
 	for (unsigned int i = 0; i < num_strings; ++i) {
 		size_t len = strlen(strings[i]);
 		char* copy = lm_pipeline_malloc(ctx, len + 1);
@@ -503,22 +512,21 @@ lm_pipeline_generate_one_of_strings(
 		copy[len] = '\0';
 
 		prefixes[i] = copy;
+		str_lens[i] = len;
 	}
 
 	struct lm_prefix_set prefix_set = {
 		.ctx = ctx,
 		.num_prefixes = num_strings,
+		.str_lens = str_lens,
 		.prefixes = prefixes,
 	};
-
-	const char* token_text;
-	unsigned int text_len;
 
 	while (true) {
 		// Keep only tokens that can generate the prefix
 		lm_pipeline_filter_next_tokens(
 			ctx,
-			(lm_pipeline_logit_filter_t)lm_pipeline_match_prefixes,
+			lm_pipeline_match_prefixes,
 			&prefix_set
 		);
 
@@ -527,32 +535,34 @@ lm_pipeline_generate_one_of_strings(
 		lm_pipeline_push_tokens(ctx, &next_token, 1);
 
 		// Modify the prefix list to keep only achievable ones
+		const char* token_text;
+		unsigned int text_len;
 		lm_pipeline_check(
 			llmd_decode_token(ctx->lm, next_token, &token_text, &text_len)
 		);
 
 		for (unsigned int i = 0; i < num_strings; ++i) {
-			char* prefix = prefixes[i];
-			if (prefix == NULL) { continue; }
-
-			size_t prefix_len = strlen(prefix);  // TODO: calculate once
+			size_t prefix_len = str_lens[i];
+			if (prefix_len == 0) { continue; }
 
 			if (text_len > prefix_len) {  // Overshot
 				// Give up on this prefix
-				prefixes[i] = NULL;
+				str_lens[i] = 0;
 				continue;
 			}
 
+			const char* prefix = prefixes[i];
 			if (memcmp(token_text, prefix, text_len) == 0) {  // Match
 				if (text_len == prefix_len) {  // Exact match
 					return i;
 				} else {  // Prefix match
 					// Skip matched chars
 					prefixes[i] += text_len;
+					str_lens[i] -= text_len;
 				}
 			} else {
 				// Give up
-				prefixes[i] = NULL;
+				str_lens[i] = 0;
 			}
 		}
 	}
@@ -564,10 +574,8 @@ struct lm_pipeline_token_set {
 };
 
 static bool
-lm_pipeline_match_tokens(
-	llmd_token_t token,
-	struct lm_pipeline_token_set* token_set
-) {
+lm_pipeline_match_tokens(llmd_token_t token, void* userdata) {
+	struct lm_pipeline_token_set* token_set = userdata;
 	for (unsigned int i = 0; i < token_set->num_tokens; ++i) {
 		if (token == token_set->tokens[i]) {
 			return true;
@@ -590,7 +598,7 @@ lm_pipeline_generate_one_of_tokens(
 
 	lm_pipeline_filter_next_tokens(
 		ctx,
-		(lm_pipeline_logit_filter_t)lm_pipeline_match_tokens,
+		lm_pipeline_match_tokens,
 		&token_set
 	);
 
@@ -602,7 +610,11 @@ lm_pipeline_generate_one_of_tokens(
 
 llmd_token_t
 lm_pipeline_sample_next_token(struct lm_pipeline_ctx* ctx) {
-	return ctx->sampler(lm_pipeline_get_next_logits(ctx), ctx->sampler_userdata);
+	return ctx->sampler(
+		lm_pipeline_get_next_logits(ctx),
+		ctx->model_info.vocab_size,
+		ctx->sampler_userdata
+	);
 }
 
 LM_PIPELINE_API unsigned int
@@ -616,9 +628,10 @@ lm_pipeline_check_suffix_str(
 
 	const char* text_buf;
 	if (!case_sensitive) {
+		// Get the uppercase buffer up-to-date
 		if (ctx->uppercase_text_offset < ctx->text_offset) {
 			memcpy(
-				ctx->uppercase_text_buf->mem,
+				ctx->uppercase_text_buf->mem + ctx->uppercase_text_offset,
 				ctx->text_buf->mem + ctx->uppercase_text_offset,
 				ctx->text_offset - ctx->uppercase_text_offset
 			);
@@ -628,7 +641,7 @@ lm_pipeline_check_suffix_str(
 				++i
 			) {
 				ctx->uppercase_text_buf->mem[i] = toupper(
-					ctx->uppercase_text_buf->mem[i]
+					ctx->text_buf->mem[i]
 				);
 			}
 			ctx->uppercase_text_offset = ctx->text_offset;
@@ -639,9 +652,29 @@ lm_pipeline_check_suffix_str(
 		text_buf = ctx->text_buf->mem;
 	}
 
-	return memcmp(text_buf - suffix_len, suffix, suffix_len) == 0
-		? suffix_len
-		: 0;
+	if (memcmp(text_buf + ctx->text_offset - suffix_len, suffix, suffix_len) != 0) {
+		return 0;
+	}
+
+	// Calculate how many tokens to walk back
+	// TODO: This is not precise, what if the suffix ends in the middle of a token?
+	const llmd_token_t* token_buf = (llmd_token_t*)ctx->token_buf->mem;
+	for (unsigned int i = 1; i < ctx->text_offset; ++i) {
+		unsigned int text_len;
+		llmd_token_t token = token_buf[ctx->token_offset - i];
+		lm_pipeline_check(
+			llmd_decode_token(ctx->lm, token, NULL, &text_len)
+		);
+
+		if (text_len >= suffix_len) {
+			return i;
+		} else {
+			suffix_len -= text_len;
+		}
+	}
+
+	lm_pipeline_abort(ctx, LLMD_ERR_IO);
+	return 0;
 }
 
 unsigned int
