@@ -61,8 +61,6 @@ struct lm_pipeline_ctx {
 
 	unsigned int text_offset;
 	llmd_buffer(char) text_buf;
-
-	unsigned int uppercase_text_offset;
 	llmd_buffer(char) uppercase_text_buf;
 
 	llmd_buffer(float) logit_buf;
@@ -187,7 +185,6 @@ lm_pipeline_run(
 	ctx->first_watcher = ctx->last_watcher = NULL;
 	ctx->finalizers = NULL;
 	ctx->eval_offset = ctx->token_offset = 0;
-	ctx->uppercase_text_offset = ctx->text_offset = 0;
 	lm_pipeline_use_argmax_sampler(ctx);
 	llmd_arena_allocator_reset(&ctx->allocator);
 	if ((status = llmd_begin_generate(lm, &ctx->gen_handle)) != LLMD_OK) {
@@ -328,9 +325,6 @@ lm_pipeline_rewind(struct lm_pipeline_ctx* ctx, unsigned int pos) {
 
 	// Rewind the text buffer to match
 	ctx->text_offset = ctx->token_text_offset[pos];
-	ctx->uppercase_text_offset = ctx->uppercase_text_offset < ctx->text_offset
-		? ctx->uppercase_text_offset
-		: ctx->text_offset;
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 		.type = LM_PIPELINE_REWIND,
@@ -387,6 +381,12 @@ lm_pipeline_push_tokens(
 	ctx->token_offset += num_tokens;
 	ctx->token_text_offset[ctx->token_offset] = ctx->text_offset;
 	ctx->text_buf[ctx->text_offset] = '\0';
+	ctx->uppercase_text_buf[ctx->text_offset] = '\0';
+
+	// Uppercase
+	for (unsigned int i = txt_start; i < ctx->text_offset; ++i) {
+		ctx->uppercase_text_buf[i] = toupper(ctx->text_buf[i]);
+	}
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 		.type = LM_PIPELINE_NEW_TOKENS,
@@ -641,31 +641,7 @@ lm_pipeline_check_suffix_str(
 	size_t suffix_len = strlen(suffix);
 	if (suffix_len > ctx->text_offset) { return 0; }
 
-	const char* text_buf;
-	if (!case_sensitive) {
-		// Get the uppercase buffer up-to-date
-		if (ctx->uppercase_text_offset < ctx->text_offset) {
-			memcpy(
-				ctx->uppercase_text_buf + ctx->uppercase_text_offset,
-				ctx->text_buf + ctx->uppercase_text_offset,
-				ctx->text_offset - ctx->uppercase_text_offset
-			);
-			for (
-				unsigned int i = ctx->uppercase_text_offset;
-				i < ctx->text_offset;
-				++i
-			) {
-				ctx->uppercase_text_buf[i] = toupper(
-					ctx->text_buf[i]
-				);
-			}
-			ctx->uppercase_text_offset = ctx->text_offset;
-		}
-
-		text_buf = ctx->uppercase_text_buf;
-	} else {
-		text_buf = ctx->text_buf;
-	}
+	const char* text_buf = case_sensitive ? ctx->text_buf : ctx->uppercase_text_buf;
 
 	if (memcmp(text_buf + ctx->text_offset - suffix_len, suffix, suffix_len) != 0) {
 		return 0;
