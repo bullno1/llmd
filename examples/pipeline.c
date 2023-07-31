@@ -23,6 +23,7 @@ knock_knock(struct lm_pipeline_ctx* ctx, void* userdata) {
 	var_(setup);
 	var_(punch_line);
 
+	printf("\n-----------------------\n");
 	tokens_(bos_);
 	str_(
 		"### Instruction:\n"
@@ -39,6 +40,12 @@ knock_knock(struct lm_pipeline_ctx* ctx, void* userdata) {
 	str_("B: "); to_str_(setup); str_(" who?\n");
 	str_("A:");
 	capture_(punch_line, ends_with_tokens_(eos_), ends_with_("\n"));
+
+	printf("\n-----------------------\n");
+	printf("%s", lm_pipeline_get_text_buf(ctx));
+
+	printf("\n-----------------------\n");
+	printf("%s", lm_pipeline_get_uppercase_text_buf(ctx));
 
 	printf("\n-----------------------\n");
 	printf("setup=|%s|\n", get_(setup));

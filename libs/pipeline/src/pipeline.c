@@ -317,6 +317,21 @@ lm_pipeline_get_num_tokens(struct lm_pipeline_ctx* ctx) {
 	return ctx->token_offset;
 }
 
+const char*
+lm_pipeline_get_text_buf(struct lm_pipeline_ctx* ctx) {
+	return ctx->text_buf;
+}
+
+const char*
+lm_pipeline_get_uppercase_text_buf(struct lm_pipeline_ctx* ctx) {
+	return ctx->uppercase_text_buf;
+}
+
+unsigned int
+lm_pipeline_get_text_buf_size(struct lm_pipeline_ctx* ctx) {
+	return ctx->text_offset;
+}
+
 void
 lm_pipeline_rewind(struct lm_pipeline_ctx* ctx, unsigned int pos) {
 	assert(pos <= ctx->token_offset);

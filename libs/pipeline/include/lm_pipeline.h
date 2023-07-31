@@ -113,6 +113,15 @@ lm_pipeline_get_tokens(struct lm_pipeline_ctx* ctx);
 LM_PIPELINE_API unsigned int
 lm_pipeline_get_num_tokens(struct lm_pipeline_ctx* ctx);
 
+LM_PIPELINE_API const char*
+lm_pipeline_get_text_buf(struct lm_pipeline_ctx* ctx);
+
+LM_PIPELINE_API const char*
+lm_pipeline_get_uppercase_text_buf(struct lm_pipeline_ctx* ctx);
+
+LM_PIPELINE_API unsigned int
+lm_pipeline_get_text_buf_size(struct lm_pipeline_ctx* ctx);
+
 LM_PIPELINE_API void
 lm_pipeline_rewind(struct lm_pipeline_ctx* ctx, unsigned int pos);
 
