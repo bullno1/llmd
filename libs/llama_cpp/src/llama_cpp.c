@@ -13,7 +13,7 @@ struct llmd_llama_cpp_driver {
 	struct llmd_host* host;
 	struct llmd_llama_cpp_driver_config* config;
 
-	struct llmd_buffer* tmp_str_buf;
+	llmd_buffer(char) tmp_str_buf;
 	struct llama_model* model;
 	struct llama_context* contexts[];
 };
@@ -98,13 +98,13 @@ llmd_llama_cpp_tokenize(
 	// Copy because we support non-null terminated string while llama.cpp
 	// requires it.
 	if (num_chars >= llmd_buffer_size(driver->tmp_str_buf)) {
-		driver->tmp_str_buf = llmd_realloc_buffer(driver->host, driver->tmp_str_buf, num_chars + 1);
+		driver->tmp_str_buf = llmd_resize_buffer(driver->host, driver->tmp_str_buf, num_chars + 1);
 	}
-	memcpy(driver->tmp_str_buf->mem, string, num_chars);
-	driver->tmp_str_buf->mem[num_chars] = '\0';
+	memcpy(driver->tmp_str_buf, string, num_chars);
+	driver->tmp_str_buf[num_chars] = '\0';
 
 	int num_tokens = llama_tokenize_with_model(
-		driver->model, driver->tmp_str_buf->mem, (int*)tokens_out, *num_tokens_inout, false
+		driver->model, driver->tmp_str_buf, (int*)tokens_out, *num_tokens_inout, false
 	);
 
 	if (num_tokens < 0) {
@@ -243,7 +243,7 @@ llmd_destroy_llama_cpp_driver(
 		}
 	}
 
-	llmd_free(driver->host, driver->tmp_str_buf);
+	llmd_free_buffer(driver->host, driver->tmp_str_buf);
 	llama_free_model(driver->model);
 	llmd_free(driver->host, driver);
 

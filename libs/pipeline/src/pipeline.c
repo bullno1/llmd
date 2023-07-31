@@ -56,15 +56,15 @@ struct lm_pipeline_ctx {
 
 	unsigned int eval_offset;
 	unsigned int token_offset;
-	struct llmd_buffer* token_buf;
+	llmd_buffer(llmd_token_t) token_buf;
 
 	unsigned int text_offset;
-	struct llmd_buffer* text_buf;
+	llmd_buffer(char) text_buf;
 
 	unsigned int uppercase_text_offset;
-	struct llmd_buffer* uppercase_text_buf;
+	llmd_buffer(char) uppercase_text_buf;
 
-	struct llmd_buffer* logit_buf;
+	llmd_buffer(float) logit_buf;
 
 	enum llmd_error status;
 
@@ -110,10 +110,10 @@ lm_pipeline_create_ctx(struct llmd_host* host) {
 void
 lm_pipeline_destroy_ctx(struct lm_pipeline_ctx* ctx) {
 	llmd_arena_allocator_cleanup(&ctx->allocator);
-	llmd_free(ctx->host, ctx->text_buf);
-	llmd_free(ctx->host, ctx->uppercase_text_buf);
-	llmd_free(ctx->host, ctx->token_buf);
-	llmd_free(ctx->host, ctx->logit_buf);
+	llmd_free_buffer(ctx->host, ctx->text_buf);
+	llmd_free_buffer(ctx->host, ctx->uppercase_text_buf);
+	llmd_free_buffer(ctx->host, ctx->token_buf);
+	llmd_free_buffer(ctx->host, ctx->logit_buf);
 	llmd_free(ctx->host, ctx);
 }
 
@@ -131,9 +131,9 @@ lm_pipeline_run(
 	}
 
 	// Ensure a large enough buffer for context tokens
-	size_t required_token_buf_size = ctx->model_info.max_context_length * sizeof(llmd_token_t);
+	size_t required_token_buf_size = ctx->model_info.max_context_length;
 	if (llmd_buffer_size(ctx->token_buf) < required_token_buf_size) {
-		ctx->token_buf = llmd_realloc_buffer(
+		ctx->token_buf = llmd_resize_buffer(
 			ctx->host, ctx->token_buf, required_token_buf_size
 		);
 		if (ctx->token_buf == NULL) { return LLMD_ERR_OOM; }
@@ -153,10 +153,10 @@ lm_pipeline_run(
 	// Add 1 for NULL terminator
 	size_t required_text_buf_size = ctx->model_info.vocab_size * max_token_length + 1;
 	if (llmd_buffer_size(ctx->text_buf) < required_text_buf_size) {
-		ctx->text_buf = llmd_realloc_buffer(
+		ctx->text_buf = llmd_resize_buffer(
 			ctx->host, ctx->text_buf, required_text_buf_size
 		);
-		ctx->uppercase_text_buf = llmd_realloc_buffer(
+		ctx->uppercase_text_buf = llmd_resize_buffer(
 			ctx->host, ctx->uppercase_text_buf, required_text_buf_size
 		);
 		if (ctx->text_buf == NULL || ctx->uppercase_text_buf == NULL) {
@@ -165,9 +165,9 @@ lm_pipeline_run(
 	}
 
 	// Ensure a large enough buffer for logits
-	size_t required_logit_buf_size = ctx->model_info.vocab_size * sizeof(float);
+	size_t required_logit_buf_size = ctx->model_info.vocab_size;
 	if (llmd_buffer_size(ctx->logit_buf) < required_logit_buf_size) {
-		ctx->logit_buf = llmd_realloc_buffer(
+		ctx->logit_buf = llmd_resize_buffer(
 			ctx->host, ctx->logit_buf, required_logit_buf_size
 		);
 		if (ctx->logit_buf == NULL) { return LLMD_ERR_OOM; }
@@ -304,7 +304,7 @@ lm_pipeline_set_sampler(
 
 const llmd_token_t*
 lm_pipeline_get_tokens(struct lm_pipeline_ctx* ctx) {
-	return (void*)ctx->token_buf->mem;
+	return ctx->token_buf;
 }
 
 unsigned int
@@ -320,10 +320,9 @@ lm_pipeline_rewind(struct lm_pipeline_ctx* ctx, unsigned int pos) {
 	ctx->eval_offset = ctx->eval_offset < pos ? ctx->eval_offset : pos;
 
 	// Rewind the text buffer to match
-	llmd_token_t* token_buf = (llmd_token_t*)ctx->token_buf->mem;
 	for (unsigned int i = pos; i < old_offset; ++i) {
 		unsigned int token_len;
-		llmd_token_t token = token_buf[i];
+		llmd_token_t token = ctx->token_buf[i];
 		lm_pipeline_check(llmd_decode_token(ctx->lm, token, NULL, &token_len));
 		ctx->text_offset -= token_len;
 	}
@@ -367,7 +366,7 @@ lm_pipeline_push_tokens(
 	);
 
 	memcpy(
-		(llmd_token_t*)ctx->token_buf->mem + ctx->token_offset,
+		ctx->token_buf + ctx->token_offset,
 		tokens, num_tokens * sizeof(llmd_token_t)
 	);
 	ctx->token_offset += num_tokens;
@@ -380,10 +379,10 @@ lm_pipeline_push_tokens(
 			llmd_decode_token(ctx->lm, tokens[i], &str, &num_chars)
 		);
 
-		memcpy(ctx->text_buf->mem + ctx->text_offset, str, num_chars);
+		memcpy(ctx->text_buf + ctx->text_offset, str, num_chars);
 		ctx->text_offset += num_chars;
 	}
-	ctx->text_buf->mem[ctx->text_offset] = '\0';
+	ctx->text_buf[ctx->text_offset] = '\0';
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 		.type = LM_PIPELINE_NEW_TOKENS,
@@ -391,7 +390,7 @@ lm_pipeline_push_tokens(
 			.new_tokens = {
 				.tokens = tokens,
 				.num_tokens = num_tokens,
-				.string = ctx->text_buf->mem + txt_start,
+				.string = ctx->text_buf + txt_start,
 				.num_chars = ctx->text_offset - txt_start,
 			}
 		}
@@ -426,7 +425,7 @@ lm_pipeline_var_get(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* var) {
 
 	size_t len = var->text_span.end - var->text_span.begin;
 	char* buf = lm_pipeline_malloc(ctx, len + 1);
-	memcpy(buf, ctx->text_buf->mem + var->text_span.begin, len);
+	memcpy(buf, ctx->text_buf + var->text_span.begin, len);
 	buf[len] = '\0';
 
 	return buf;
@@ -434,8 +433,6 @@ lm_pipeline_var_get(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* var) {
 
 float*
 lm_pipeline_get_next_logits(struct lm_pipeline_ctx* ctx) {
-	float* logit_buf = (float*)&ctx->logit_buf->mem;
-
 	if (ctx->eval_offset < ctx->token_offset) {
 		lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 			.type = LM_PIPELINE_LLM_EVAL_BEGIN,
@@ -444,10 +441,10 @@ lm_pipeline_get_next_logits(struct lm_pipeline_ctx* ctx) {
 		lm_pipeline_check(
 			llmd_generate_next(
 				ctx->gen_handle,
-				(llmd_token_t*)ctx->token_buf->mem + ctx->eval_offset,
+				ctx->token_buf + ctx->eval_offset,
 				ctx->token_offset - ctx->eval_offset,
 				ctx->eval_offset,
-				logit_buf
+				ctx->logit_buf
 			)
 		);
 
@@ -461,11 +458,11 @@ lm_pipeline_get_next_logits(struct lm_pipeline_ctx* ctx) {
 			entry != NULL;
 			entry = entry->next
 		) {
-			entry->fn(logit_buf, ctx->model_info.vocab_size, entry->userdata);
+			entry->fn(ctx->logit_buf, ctx->model_info.vocab_size, entry->userdata);
 		}
 	}
 
-	return logit_buf;
+	return ctx->logit_buf;
 }
 
 void
@@ -647,8 +644,8 @@ lm_pipeline_check_suffix_str(
 		// Get the uppercase buffer up-to-date
 		if (ctx->uppercase_text_offset < ctx->text_offset) {
 			memcpy(
-				ctx->uppercase_text_buf->mem + ctx->uppercase_text_offset,
-				ctx->text_buf->mem + ctx->uppercase_text_offset,
+				ctx->uppercase_text_buf + ctx->uppercase_text_offset,
+				ctx->text_buf + ctx->uppercase_text_offset,
 				ctx->text_offset - ctx->uppercase_text_offset
 			);
 			for (
@@ -656,16 +653,16 @@ lm_pipeline_check_suffix_str(
 				i < ctx->text_offset;
 				++i
 			) {
-				ctx->uppercase_text_buf->mem[i] = toupper(
-					ctx->text_buf->mem[i]
+				ctx->uppercase_text_buf[i] = toupper(
+					ctx->text_buf[i]
 				);
 			}
 			ctx->uppercase_text_offset = ctx->text_offset;
 		}
 
-		text_buf = ctx->uppercase_text_buf->mem;
+		text_buf = ctx->uppercase_text_buf;
 	} else {
-		text_buf = ctx->text_buf->mem;
+		text_buf = ctx->text_buf;
 	}
 
 	if (memcmp(text_buf + ctx->text_offset - suffix_len, suffix, suffix_len) != 0) {
@@ -674,10 +671,9 @@ lm_pipeline_check_suffix_str(
 
 	// Calculate how many tokens to walk back
 	// TODO: This is not precise, what if the suffix ends in the middle of a token?
-	const llmd_token_t* token_buf = (llmd_token_t*)ctx->token_buf->mem;
 	for (unsigned int i = 1; i < ctx->text_offset; ++i) {
 		unsigned int text_len;
-		llmd_token_t token = token_buf[ctx->token_offset - i];
+		llmd_token_t token = ctx->token_buf[ctx->token_offset - i];
 		lm_pipeline_check(
 			llmd_decode_token(ctx->lm, token, NULL, &text_len)
 		);
@@ -702,7 +698,7 @@ lm_pipeline_check_suffix_tokens(
 
 	return memcmp(
 		tokens,
-		(llmd_token_t*)ctx->token_buf->mem + ctx->token_offset - num_tokens,
+		ctx->token_buf + ctx->token_offset - num_tokens,
 		num_tokens * sizeof(llmd_token_t)
 	) == 0 ? num_tokens : 0;
 }
