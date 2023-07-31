@@ -5,17 +5,11 @@
 #include <llmd/core.h>
 #include <stdbool.h>
 
-struct lm_pipeline_span {
-	unsigned int begin;
-	unsigned int end;
-};
-
 struct lm_pipeline_var {
 	const char* name;
-	// FIXME: Expose token offset only. Use a mapping from token offset to text offset
-	// Rolling back will also be faster
-	struct lm_pipeline_span token_span;
-	struct lm_pipeline_span text_span;
+
+	unsigned int begin;
+	unsigned int end;
 };
 
 enum lm_pipeline_event_type {

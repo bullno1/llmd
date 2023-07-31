@@ -57,6 +57,7 @@ struct lm_pipeline_ctx {
 	unsigned int eval_offset;
 	unsigned int token_offset;
 	llmd_buffer(llmd_token_t) token_buf;
+	llmd_buffer(unsigned int) token_text_offset;
 
 	unsigned int text_offset;
 	llmd_buffer(char) text_buf;
@@ -112,6 +113,7 @@ lm_pipeline_destroy_ctx(struct lm_pipeline_ctx* ctx) {
 	llmd_arena_allocator_cleanup(&ctx->allocator);
 	llmd_free_buffer(ctx->host, ctx->text_buf);
 	llmd_free_buffer(ctx->host, ctx->uppercase_text_buf);
+	llmd_free_buffer(ctx->host, ctx->token_text_offset);
 	llmd_free_buffer(ctx->host, ctx->token_buf);
 	llmd_free_buffer(ctx->host, ctx->logit_buf);
 	llmd_free(ctx->host, ctx);
@@ -137,6 +139,11 @@ lm_pipeline_run(
 			ctx->host, ctx->token_buf, required_token_buf_size
 		);
 		if (ctx->token_buf == NULL) { return LLMD_ERR_OOM; }
+
+		ctx->token_text_offset = llmd_resize_buffer(
+			ctx->host, ctx->token_text_offset, required_token_buf_size
+		);
+		if (ctx->token_text_offset == NULL) { return LLMD_ERR_OOM; }
 	}
 
 	// Ensure a large enough buffer for context strings
@@ -314,6 +321,7 @@ lm_pipeline_get_num_tokens(struct lm_pipeline_ctx* ctx) {
 
 void
 lm_pipeline_rewind(struct lm_pipeline_ctx* ctx, unsigned int pos) {
+	// TODO: Use ctx->token_text_offset
 	assert(pos <= ctx->token_offset);
 	unsigned int old_offset = ctx->token_offset;
 	ctx->token_offset = pos;
@@ -369,7 +377,6 @@ lm_pipeline_push_tokens(
 		ctx->token_buf + ctx->token_offset,
 		tokens, num_tokens * sizeof(llmd_token_t)
 	);
-	ctx->token_offset += num_tokens;
 
 	unsigned int txt_start = ctx->text_offset;
 	for (unsigned int i = 0; i < num_tokens; ++i) {
@@ -380,8 +387,10 @@ lm_pipeline_push_tokens(
 		);
 
 		memcpy(ctx->text_buf + ctx->text_offset, str, num_chars);
+		ctx->token_text_offset[ctx->token_offset + i] = ctx->text_offset;
 		ctx->text_offset += num_chars;
 	}
+	ctx->token_offset += num_tokens;
 	ctx->text_buf[ctx->text_offset] = '\0';
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
@@ -399,8 +408,7 @@ lm_pipeline_push_tokens(
 
 void
 lm_pipeline_begin_capture(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* var) {
-	var->token_span.begin = ctx->token_offset;
-	var->text_span.begin = ctx->text_offset;
+	var->begin = var->end = ctx->token_offset;
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 		.type = LM_PIPELINE_CAPTURE_BEGIN,
@@ -410,8 +418,7 @@ lm_pipeline_begin_capture(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* v
 
 void
 lm_pipeline_end_capture(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* var) {
-	var->token_span.end = ctx->token_offset;
-	var->text_span.end = ctx->text_offset;
+	var->end = ctx->token_offset;
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
 		.type = LM_PIPELINE_CAPTURE_END,
@@ -423,9 +430,9 @@ const char*
 lm_pipeline_var_get(struct lm_pipeline_ctx* ctx, struct lm_pipeline_var* var) {
 	assert(var->end >= var->begin);
 
-	size_t len = var->text_span.end - var->text_span.begin;
+	size_t len = ctx->token_text_offset[var->end] - ctx->token_text_offset[var->begin];
 	char* buf = lm_pipeline_malloc(ctx, len + 1);
-	memcpy(buf, ctx->text_buf + var->text_span.begin, len);
+	memcpy(buf, ctx->text_buf + ctx->token_text_offset[var->begin], len);
 	buf[len] = '\0';
 
 	return buf;
