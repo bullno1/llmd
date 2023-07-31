@@ -140,8 +140,9 @@ lm_pipeline_run(
 		);
 		if (ctx->token_buf == NULL) { return LLMD_ERR_OOM; }
 
+		// Allocate one extra slot for the final position
 		ctx->token_text_offset = llmd_resize_buffer(
-			ctx->host, ctx->token_text_offset, required_token_buf_size
+			ctx->host, ctx->token_text_offset, required_token_buf_size + 1
 		);
 		if (ctx->token_text_offset == NULL) { return LLMD_ERR_OOM; }
 	}
@@ -321,19 +322,12 @@ lm_pipeline_get_num_tokens(struct lm_pipeline_ctx* ctx) {
 
 void
 lm_pipeline_rewind(struct lm_pipeline_ctx* ctx, unsigned int pos) {
-	// TODO: Use ctx->token_text_offset
 	assert(pos <= ctx->token_offset);
-	unsigned int old_offset = ctx->token_offset;
 	ctx->token_offset = pos;
 	ctx->eval_offset = ctx->eval_offset < pos ? ctx->eval_offset : pos;
 
 	// Rewind the text buffer to match
-	for (unsigned int i = pos; i < old_offset; ++i) {
-		unsigned int token_len;
-		llmd_token_t token = ctx->token_buf[i];
-		lm_pipeline_check(llmd_decode_token(ctx->lm, token, NULL, &token_len));
-		ctx->text_offset -= token_len;
-	}
+	ctx->text_offset = ctx->token_text_offset[pos];
 	ctx->uppercase_text_offset = ctx->uppercase_text_offset < ctx->text_offset
 		? ctx->uppercase_text_offset
 		: ctx->text_offset;
@@ -386,11 +380,12 @@ lm_pipeline_push_tokens(
 			llmd_decode_token(ctx->lm, tokens[i], &str, &num_chars)
 		);
 
-		memcpy(ctx->text_buf + ctx->text_offset, str, num_chars);
 		ctx->token_text_offset[ctx->token_offset + i] = ctx->text_offset;
+		memcpy(ctx->text_buf + ctx->text_offset, str, num_chars);
 		ctx->text_offset += num_chars;
 	}
 	ctx->token_offset += num_tokens;
+	ctx->token_text_offset[ctx->token_offset] = ctx->text_offset;
 	ctx->text_buf[ctx->text_offset] = '\0';
 
 	lm_pipeline_emit_event(ctx, (struct lm_pipeline_event) {
@@ -678,6 +673,7 @@ lm_pipeline_check_suffix_str(
 
 	// Calculate how many tokens to walk back
 	// TODO: This is not precise, what if the suffix ends in the middle of a token?
+	// TODO: Use ctx->token_text_offset
 	for (unsigned int i = 1; i < ctx->text_offset; ++i) {
 		unsigned int text_len;
 		llmd_token_t token = ctx->token_buf[ctx->token_offset - i];

@@ -28,7 +28,7 @@ knock_knock(struct lm_pipeline_ctx* ctx, void* userdata) {
 		"### Instruction:\n"
 		"This is a conversation between two characters A and B.\n"
 		"A tells B a knock knock joke.\n"
-
+		"\n"
 		"### Response:\n"
 		"A: Knock knock\n"
 		"B: Who's there?\n"
