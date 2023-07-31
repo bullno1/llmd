@@ -1,5 +1,6 @@
 #include <lm_pipeline.h>
 #include <lm_pipeline/macro.h>
+#include <lm_pipeline/sampling.h>
 #include "common.h"
 
 static void
@@ -23,26 +24,25 @@ knock_knock(struct lm_pipeline_ctx* ctx, void* userdata) {
 	var_(punch_line);
 
 	tokens_(bos_);
-	str_("A chat between a curious user and an artificial intelligence assistant. ");
-	str_("The assistant gives helpful, detailed, and polite answers to the user's questions.\n");
-	str_("USER: Tell me a knock knock joke.\n");
-	str_("ASSISTANT: Knock knock.\n");
-	str_("USER: Who's there?\n");
-	str_("ASSISTANT: ");
-	capture_(
-		setup,
-		ends_with_tokens_(eos_),
-		ends_with_("USER:"), ends_with_("\n"), ends_with_(".")
-	);
+	str_(
+		"### Instruction:\n"
+		"This is a conversation between two characters A and B.\n"
+		"A tells B a knock knock joke.\n"
 
-	to_str_(setup); tokens_(nl_);
-	str_("USER: "); to_str_(setup); str_(" who?\n");
-	str_("ASSISTANT:");
-	capture_(punch_line, ends_with_tokens_(eos_), ends_with_("USER:"));
+		"### Response:\n"
+		"A: Knock knock\n"
+		"B: Who's there?\n"
+		"A:"
+	);
+	capture_(setup, ends_with_("\nB:")); str_("\n");
+
+	str_("B: "); to_str_(setup); str_(" who?\n");
+	str_("A:");
+	capture_(punch_line, ends_with_tokens_(eos_), ends_with_("\n"));
 
 	printf("\n-----------------------\n");
-	printf("Setup=|%s|\n", get_(setup));
-	printf("Punch line=|%s|\n", get_(punch_line));
+	printf("setup=|%s|\n", get_(setup));
+	printf("punch_line=|%s|\n", get_(punch_line));
 }
 
 int
