@@ -24,31 +24,7 @@ main(int argc, const char* argv[]) {
 	struct driver_config driver_config = { 0 };
 
 	struct argparse_option options[] = {
-		OPT_HELP(),
-		OPT_GROUP("Driver options"),
-		{
-			.type = ARGPARSE_OPT_STRING,
-			.short_name = 'd',
-			.long_name = "driver",
-			.value = &driver_config.driver_path,
-			.help = "Path to driver",
-		},
-		{
-			.type = ARGPARSE_OPT_STRING,
-			.short_name = 'c',
-			.long_name = "config",
-			.value = &driver_config.config_file_path,
-			.help = "Path to config file",
-		},
-		{
-			.type = ARGPARSE_OPT_STRING,
-			.short_name = 's',
-			.long_name = "set",
-			.help = "Set driver config directly. For example: --set=main.model_path=custom_path",
-			.callback = parse_driver_config,
-			.value = &driver_config.tmp_string,
-			.data = (intptr_t)(void*)&driver_config,
-		},
+		COMMON_OPTIONS,
 		OPT_GROUP("Generation options"),
 		{
 			.type = ARGPARSE_OPT_INTEGER,
