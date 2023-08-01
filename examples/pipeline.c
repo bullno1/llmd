@@ -33,13 +33,10 @@ knock_knock(struct lm_pipeline_ctx* ctx, void* userdata) {
 		"### Response:\n"
 		"A: Knock knock\n"
 		"B: Who's there?\n"
-		"A:"
 	);
-	capture_(setup, ends_with_("\nB:")); str_("\n");
-
+	str_("A:"); capture_(setup, ends_with_("\nB:")); str_("\n");
 	str_("B: "); to_str_(setup); str_(" who?\n");
-	str_("A:");
-	capture_(punch_line, ends_with_tokens_(eos_), ends_with_("\n"));
+	str_("A:"); capture_(punch_line, ends_with_tokens_(eos_), ends_with_("\n"));
 
 	printf("\n-----------------------\n");
 	printf("%s", lm_pipeline_get_text_buf(ctx));
