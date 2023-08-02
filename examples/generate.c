@@ -4,6 +4,8 @@
 #include <llmd/sampling.h>
 #include <stdlib.h>
 #include <time.h>
+#include <errno.h>
+#include <string.h>
 #include "common.h"
 
 #define READ_BLOCK 1024
@@ -11,6 +13,8 @@
 int
 main(int argc, const char* argv[]) {
 	char* prompt = malloc(READ_BLOCK);
+	const char* input_path = "-";
+	FILE* input_file = stdin;
 	size_t prompt_len = 0;
 	size_t prompt_buf_size = READ_BLOCK;
 	int seed = 0;
@@ -26,6 +30,13 @@ main(int argc, const char* argv[]) {
 	struct argparse_option options[] = {
 		COMMON_OPTIONS,
 		OPT_GROUP("Generation options"),
+		{
+			.type = ARGPARSE_OPT_STRING,
+			.long_name = "file",
+			.short_name = 'f',
+			.help = "The input file, use '-' for stdin",
+			.value = &input_path,
+		},
 		{
 			.type = ARGPARSE_OPT_INTEGER,
 			.long_name = "seed",
@@ -66,7 +77,7 @@ main(int argc, const char* argv[]) {
 	};
 	struct argparse argparse;
 	argparse_init(&argparse, options, NULL, ARGPARSE_STOP_AT_NON_OPTION);
-	argparse_describe(&argparse, "Feed a prompt to a model from stdin and run until completion", NULL);
+	argparse_describe(&argparse, "Feed a prompt to a model and run until completion", NULL);
 	argparse_parse(&argparse, argc, argv);
 
 	enum llmd_error status = LLMD_OK;
@@ -93,10 +104,20 @@ main(int argc, const char* argv[]) {
 	scratch_buf = malloc(sizeof(float) * model_info.vocab_size);
 	mirostat.scratch_buf = scratch_buf;
 
-	// Read prompt from stdin
+	// Read prompt
+	if (strcmp(input_path, "-") == 0) {
+		input_file = stdin;
+	} else {
+		input_file = fopen(input_path, "r");
+		if (input_file == NULL) {
+			fprintf(stderr, "Could not open %s: %s\n", input_path, strerror(errno));
+			goto end;
+		}
+	}
+
 	char buf[READ_BLOCK];
 	size_t num_chars;
-	while ((num_chars = fread(buf, 1, READ_BLOCK, stdin)) != 0) {
+	while ((num_chars = fread(buf, 1, READ_BLOCK, input_file)) != 0) {
 		if ((num_chars + prompt_len) > prompt_buf_size) {
 			prompt_buf_size *= 2;
 			prompt = realloc(prompt, prompt_buf_size);
@@ -108,6 +129,10 @@ main(int argc, const char* argv[]) {
 
 		memcpy(prompt + prompt_len, buf, num_chars);
 		prompt_len += num_chars;
+	}
+
+	if (input_file != stdin) {
+		fclose(input_file);
 	}
 
 	LLMD_CHECK(llmd_create_context(session, LLMD_CONTEXT_MIN_UPLOAD, &context));
